@@ -23,6 +23,7 @@ function hasObjectChanged(previous: SizeObject | undefined, current: SizeObject)
 
 export type ProjectionMode = "perspective" | "orthographic";
 export type StandardView = "front" | "back" | "top" | "bottom" | "left" | "right";
+export type DisplayStyle = "solid" | "transparent" | "wireframe";
 
 export interface SceneManager {
   syncObjects(objects: readonly SizeObject[]): void;
@@ -287,6 +288,34 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let attachedId: string | null = null;
   let showNameLabels = true;
   let showDimensionLabels = true;
+  let displayStyle: DisplayStyle = "transparent";
+
+  // Wireframe is driven by opacity, not mesh.visible — Raycaster skips
+  // invisible objects, and this mesh is exactly what click-to-select
+  // raycasts against (meshToId / the pointerup handler below). Hiding it
+  // would silently break selecting objects while in Wireframe mode. The
+  // always-visible `edges` LineSegments (EdgesGeometry) already draws a
+  // clean box outline, which also looks better than material.wireframe —
+  // that would additionally draw the diagonal triangle-split line per face.
+  function applyDisplayStyleToMesh(mesh: THREE.Mesh): void {
+    const material = mesh.material as THREE.MeshStandardMaterial;
+    material.transparent = displayStyle !== "solid";
+    material.opacity = displayStyle === "solid" ? 1 : displayStyle === "transparent" ? BOX_OPACITY : 0;
+    material.depthWrite = displayStyle === "solid";
+    material.needsUpdate = true;
+  }
+
+  function applyDisplayStyle(): void {
+    for (const group of groups.values()) {
+      const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
+      if (mesh) applyDisplayStyleToMesh(mesh);
+    }
+  }
+
+  function setDisplayStyle(style: DisplayStyle): void {
+    displayStyle = style;
+    applyDisplayStyle();
+  }
 
   function buildGroup(object: SizeObject): THREE.Group {
     const group = new THREE.Group();
@@ -295,12 +324,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     const geometry = new THREE.BoxGeometry(object.width, object.height, object.depth);
     const material = new THREE.MeshStandardMaterial({
       color: object.color,
-      transparent: true,
-      opacity: BOX_OPACITY,
       side: THREE.DoubleSide,
-      depthWrite: false,
     });
     const mesh = new THREE.Mesh(geometry, material);
+    applyDisplayStyleToMesh(mesh);
     group.add(mesh);
     meshToId.set(mesh, object.id);
 
@@ -757,6 +784,27 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   projectionGroup.append(perspectiveBtn, orthographicBtn);
 
+  const displayStyleGroup = document.createElement("div");
+  displayStyleGroup.className = "toolbar-group";
+
+  const DISPLAY_STYLE_LABELS: Record<DisplayStyle, string> = {
+    solid: "Solid",
+    transparent: "Transparent",
+    wireframe: "Wireframe",
+  };
+
+  const displayStyleButtons = (Object.keys(DISPLAY_STYLE_LABELS) as DisplayStyle[]).map((style) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = DISPLAY_STYLE_LABELS[style];
+    btn.addEventListener("click", () => {
+      setDisplayStyle(style);
+      updateToolbarUI();
+    });
+    displayStyleGroup.appendChild(btn);
+    return { style, btn };
+  });
+
   const viewGroup = document.createElement("div");
   viewGroup.className = "toolbar-group view-group";
 
@@ -806,7 +854,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   const topRow = document.createElement("div");
   topRow.className = "toolbar-row";
-  topRow.append(projectionGroup, labelGroup);
+  topRow.append(projectionGroup, displayStyleGroup, labelGroup);
 
   toolbar.append(topRow, viewGroup);
   container.appendChild(toolbar);
@@ -816,6 +864,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orthographicBtn.classList.toggle("active", projectionMode === "orthographic");
     viewGroup.classList.toggle("visible", projectionMode === "orthographic");
     for (const btn of viewButtons) btn.disabled = projectionMode !== "orthographic";
+    for (const { style, btn } of displayStyleButtons) btn.classList.toggle("active", displayStyle === style);
     nameLabelsBtn.classList.toggle("active", showNameLabels);
     dimensionLabelsBtn.classList.toggle("active", showDimensionLabels);
   }
