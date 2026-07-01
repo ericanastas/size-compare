@@ -30,13 +30,18 @@ export class ObjectStore {
   private _objects: SizeObject[] = [];
   private listeners: Array<(objects: SizeObject[]) => void> = [];
   private nextId = 1;
+  // Tracks the next never-used hue index, independent of the current list
+  // length — using length directly meant removing an object and then adding
+  // a new one reused a lower index, colliding with a color still in use
+  // instead of continuing to spread across the palette.
+  private nextColorIndex = 0;
 
   get objects(): readonly SizeObject[] {
     return this._objects;
   }
 
   add(name: string, width: number, height: number, depth: number): SizeObject {
-    const object = this.buildObject(name, width, height, depth, this._objects.length);
+    const object = this.buildObject(name, width, height, depth, this.nextColorIndex++);
     this._objects = [...this._objects, object];
     this.notify();
     return object;
@@ -100,6 +105,7 @@ export class ObjectStore {
     }>,
   ): void {
     this.nextId = 1;
+    this.nextColorIndex = rows.length;
     this._objects = rows.map((row, index) =>
       this.buildObject(row.name, row.width, row.height, row.depth, index, row.position),
     );
@@ -109,6 +115,7 @@ export class ObjectStore {
   loadFull(objects: readonly SizeObject[]): void {
     this._objects = [...objects];
     this.nextId = objects.reduce((max, o) => Math.max(max, Number(o.id) || 0), 0) + 1;
+    this.nextColorIndex = objects.length;
     this.notify();
   }
 
