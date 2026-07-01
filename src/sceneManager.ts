@@ -30,34 +30,32 @@ export interface SceneManager {
   render(): void;
 }
 
+// OrbitControls always orbits around world "up" (0, 1, 0) — that's what keeps the
+// vertical axis vertical while dragging. Looking exactly straight down/up is
+// degenerate for that (view direction parallel to up), so top/bottom are nudged a
+// hair off the pole; visually indistinguishable from a true top/bottom view, but it
+// keeps orbiting well-defined instead of rolling around the view axis.
+const POLE_TILT = 0.001;
+
 const STANDARD_VIEW_DIRECTIONS: Record<StandardView, THREE.Vector3> = {
   front: new THREE.Vector3(0, 0, 1),
   back: new THREE.Vector3(0, 0, -1),
-  top: new THREE.Vector3(0, 1, 0),
-  bottom: new THREE.Vector3(0, -1, 0),
+  top: new THREE.Vector3(0, 1, POLE_TILT).normalize(),
+  bottom: new THREE.Vector3(0, -1, POLE_TILT).normalize(),
   left: new THREE.Vector3(-1, 0, 0),
   right: new THREE.Vector3(1, 0, 0),
-};
-
-const STANDARD_VIEW_UP: Record<StandardView, THREE.Vector3> = {
-  front: new THREE.Vector3(0, 1, 0),
-  back: new THREE.Vector3(0, 1, 0),
-  top: new THREE.Vector3(0, 0, -1),
-  bottom: new THREE.Vector3(0, 0, 1),
-  left: new THREE.Vector3(0, 1, 0),
-  right: new THREE.Vector3(0, 1, 0),
 };
 
 function copyCameraPose(from: THREE.Camera, to: THREE.Camera): void {
   to.position.copy(from.position);
   to.quaternion.copy(from.quaternion);
-  to.up.copy(from.up);
 }
 
 export function createSceneManager(container: HTMLElement): SceneManager {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1d22);
 
+  // perspectiveCamera.up is intentionally never modified; always (0, 1, 0).
   const perspectiveCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
   perspectiveCamera.position.set(18, 14, 22);
 
@@ -306,7 +304,6 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
     const distance = Math.max(frameRadius, 1) * 4 + 10;
     orthographicCamera.position.copy(frameCenter).addScaledVector(STANDARD_VIEW_DIRECTIONS[view], distance);
-    orthographicCamera.up.copy(STANDARD_VIEW_UP[view]);
     orthographicCamera.lookAt(frameCenter);
     orthographicCamera.near = Math.max(distance / 100, 0.1);
     orthographicCamera.far = distance * 20;
