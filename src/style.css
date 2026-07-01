@@ -336,3 +336,19 @@ h1 {
   white-space: nowrap;
   transform: translate(-50%, -50%);
 }
+
+.axis-label {
+  color: #6b7078;
+  font-size: 12px;
+  font-family: system-ui, sans-serif;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #1a1d22, 0 0 3px #1a1d22;
+}
+
+.axis-label--x {
+  transform: translate(-50%, 60%);
+}
+
+.axis-label--z {
+  transform: translate(-40%, -50%);
+}

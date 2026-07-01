@@ -100,6 +100,44 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     return new THREE.GridHelper(size, divisions, 0x444444, 0x2a2d33);
   }
 
+  // One label per grid line along each ground-plane axis, strung along the
+  // axis lines themselves (through the origin) rather than the grid's
+  // outer edges. Divisions are always even and cell size is always a power
+  // of two, so size is always even and every coordinate here is an exact
+  // integer.
+  function createAxisLabels(size: number, divisions: number): CSS2DObject[] {
+    const half = size / 2;
+    const cellSize = size / divisions;
+    const labels: CSS2DObject[] = [];
+
+    for (let i = 0; i <= divisions; i++) {
+      const coord = Math.round(-half + i * cellSize);
+
+      const xEl = document.createElement("div");
+      xEl.className = "axis-label axis-label--x";
+      xEl.textContent = String(coord);
+      const xLabel = new CSS2DObject(xEl);
+      xLabel.position.set(coord, 0, 0);
+      labels.push(xLabel);
+
+      const zEl = document.createElement("div");
+      zEl.className = "axis-label axis-label--z";
+      zEl.textContent = String(coord);
+      const zLabel = new CSS2DObject(zEl);
+      zLabel.position.set(0, 0, coord);
+      labels.push(zLabel);
+    }
+
+    return labels;
+  }
+
+  function disposeAxisLabels(labels: readonly CSS2DObject[]): void {
+    for (const label of labels) {
+      scene.remove(label);
+      label.element.remove();
+    }
+  }
+
   // Picks a power-of-two cell size and however many of them are needed to
   // cover `minCoverage`, choosing whichever power of two leaves the
   // resulting division count closest to TARGET_GRID_DIVISIONS. Divisions are
@@ -124,6 +162,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let { size: gridSize, divisions: gridDivisions } = pickGrid(2 * (MIN_HALF_REACH + GRID_PADDING));
   let grid = createGrid(gridSize, gridDivisions);
   scene.add(grid);
+  let axisLabels = createAxisLabels(gridSize, gridDivisions);
+  for (const label of axisLabels) scene.add(label);
 
   // The grid's own origin always stays at the world origin — only its
   // extent grows or shrinks to comfortably cover how far objects reach from
@@ -151,6 +191,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     (grid.material as THREE.Material).dispose();
     grid = createGrid(gridSize, gridDivisions);
     scene.add(grid);
+
+    disposeAxisLabels(axisLabels);
+    axisLabels = createAxisLabels(gridSize, gridDivisions);
+    for (const label of axisLabels) scene.add(label);
   }
 
   const orbitControls = new OrbitControls(camera, renderer.domElement);
