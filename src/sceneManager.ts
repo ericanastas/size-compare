@@ -171,6 +171,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   // live group positions (not the store's), so dragging an object past the
   // current edge grows the grid immediately, mid-drag.
   function updateGrid(): void {
+    updateClippingPlanes();
+
     let maxReach = MIN_HALF_REACH;
     for (const [id, group] of groups) {
       const object = lastSeen.get(id);
@@ -550,6 +552,32 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       );
     }
     return box;
+  }
+
+  // frameScene()/zoomExtents() only set near/far at the moment they run —
+  // dragging an object far from where the camera was last framed can push
+  // it past the far plane (or, if dragged very close, inside the near
+  // plane), clipping it out of view without ever re-triggering a reframe.
+  // Called every time updateGrid() is (i.e. on every store sync and on
+  // every drag frame), this keeps both cameras' clipping planes wide enough
+  // to always contain every object's current live position, independent of
+  // whether the grid itself needed to resize.
+  function updateClippingPlanes(): void {
+    const box = computeBoundsBox();
+    box.expandByPoint(new THREE.Vector3(0, 0, 0));
+    if (box.isEmpty()) return;
+
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+
+    const perspectiveFar = Math.max(perspectiveCamera.position.distanceTo(sphere.center) + sphere.radius, 1) * 2;
+    perspectiveCamera.near = Math.max(perspectiveFar / 10000, 0.01);
+    perspectiveCamera.far = perspectiveFar;
+    perspectiveCamera.updateProjectionMatrix();
+
+    const orthographicFar = Math.max(orthographicCamera.position.distanceTo(sphere.center) + sphere.radius, 1) * 2;
+    orthographicCamera.near = Math.max(orthographicFar / 10000, 0.01);
+    orthographicCamera.far = orthographicFar;
+    orthographicCamera.updateProjectionMatrix();
   }
 
   // Zoom Extents pans and zooms to fit — it must not change which way the
