@@ -373,17 +373,23 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   // rotate about the camera's view direction — an arbitrary axis that
   // finishRotateDrag (below) can't decompose into a clean single-axis 90°
   // swap. There's no public showE flag (E's visibility is tied to showX &&
-  // showY && showZ all being true), so the offending meshes are removed
-  // directly from the gizmo's internal groups. TransformControlsGizmo builds
-  // gizmo.rotate/picker.rotate once at construction and never recreates
-  // them, so this only needs to run once, here.
-  for (const group of [
-    (transformControls as unknown as { _gizmo: any })._gizmo.gizmo.rotate,
-    (transformControls as unknown as { _gizmo: any })._gizmo.picker.rotate,
-  ]) {
-    for (const child of [...group.children]) {
-      if (child.name === "E" || child.name === "XYZE") group.remove(child);
-    }
+  // showY && showZ all being true), so the offending pickers are removed
+  // directly from the gizmo's internal groups. "XYZE" is two different
+  // things sharing a name: in the *picker* group it's the free-rotate
+  // center hotspot (removed below), but in the *visual* group it's a plain
+  // grey full circle at the same radius as the X/Y/Z rings — stock
+  // TransformControls draws each colored ring as only a half-circle and
+  // relies on this grey circle behind it to fill in the other half, so it
+  // must stay or the rings look like bare half-arcs. TransformControlsGizmo
+  // builds gizmo.rotate/picker.rotate once at construction and never
+  // recreates them, so this only needs to run once, here.
+  const rotateGizmo = (transformControls as unknown as { _gizmo: any })._gizmo.gizmo.rotate;
+  const rotatePicker = (transformControls as unknown as { _gizmo: any })._gizmo.picker.rotate;
+  for (const child of [...rotateGizmo.children]) {
+    if (child.name === "E") rotateGizmo.remove(child);
+  }
+  for (const child of [...rotatePicker.children]) {
+    if (child.name === "E" || child.name === "XYZE") rotatePicker.remove(child);
   }
 
   // When multiple objects are selected the gizmo attaches to this invisible
