@@ -95,10 +95,55 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const transformControls = new TransformControls(camera, renderer.domElement);
   transformControls.setMode("translate");
   scene.add(transformControls.getHelper());
+
+  // When multiple objects are selected the gizmo attaches to this invisible
+  // proxy (positioned at the selection's centroid) instead of any one
+  // object, since TransformControls can only drive a single Object3D.
+  const multiSelectProxy = new THREE.Object3D();
+  scene.add(multiSelectProxy);
+  let multiDragStart: { proxyPosition: THREE.Vector3; groupPositions: Map<string, THREE.Vector3> } | null = null;
+
   transformControls.addEventListener("dragging-changed", (event) => {
     orbitControls.enabled = !event.value;
+
+    if (event.value && selectedIds.size > 1) {
+      const groupPositions = new Map<string, THREE.Vector3>();
+      for (const id of selectedIds) {
+        const group = groups.get(id);
+        if (group) groupPositions.set(id, group.position.clone());
+      }
+      multiDragStart = { proxyPosition: multiSelectProxy.position.clone(), groupPositions };
+    } else {
+      multiDragStart = null;
+    }
   });
+
   transformControls.addEventListener("objectChange", () => {
+    if (multiDragStart) {
+      const rawDelta = multiSelectProxy.position.clone().sub(multiDragStart.proxyPosition);
+
+      // Clamp deltaY to the most restrictive object in the group (the one
+      // closest to the ground) so the whole selection stops moving down
+      // together, rigidly, the instant any one of them would hit the floor —
+      // rather than each object clamping independently and drifting apart.
+      let deltaY = rawDelta.y;
+      for (const [id, startPosition] of multiDragStart.groupPositions) {
+        const object = lastSeen.get(id);
+        if (!object) continue;
+        const minDeltaY = object.height / 2 - startPosition.y;
+        if (minDeltaY > deltaY) deltaY = minDeltaY;
+      }
+      const delta = new THREE.Vector3(rawDelta.x, deltaY, rawDelta.z);
+
+      for (const [id, startPosition] of multiDragStart.groupPositions) {
+        const group = groups.get(id);
+        if (!group) continue;
+        group.position.copy(startPosition).add(delta);
+      }
+      multiSelectProxy.position.y = multiDragStart.proxyPosition.y + deltaY;
+      return;
+    }
+
     if (!attachedId) return;
     const object = lastSeen.get(attachedId);
     const group = groups.get(attachedId);
@@ -248,12 +293,33 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       } else {
         transformControls.detach();
       }
+    } else if (selectedIds.size > 1) {
+      attachedId = null;
+      const centroid = computeCentroid(selectedIds);
+      if (centroid) {
+        multiSelectProxy.position.copy(centroid);
+        transformControls.attach(multiSelectProxy);
+      } else {
+        transformControls.detach();
+      }
     } else {
       attachedId = null;
       transformControls.detach();
     }
 
     for (const listener of selectListeners) listener(Array.from(selectedIds));
+  }
+
+  function computeCentroid(ids: Iterable<string>): THREE.Vector3 | null {
+    const sum = new THREE.Vector3();
+    let count = 0;
+    for (const id of ids) {
+      const group = groups.get(id);
+      if (!group) continue;
+      sum.add(group.position);
+      count++;
+    }
+    return count > 0 ? sum.divideScalar(count) : null;
   }
 
   function select(id: string | null, additive = false): void {
