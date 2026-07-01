@@ -273,6 +273,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   }
 
   function syncObjects(objects: readonly SizeObject[]): void {
+    const wasEmpty = groups.size === 0;
     const currentIds = new Set(objects.map((o) => o.id));
 
     let removedSelected = false;
@@ -299,7 +300,12 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       lastSeen.set(object.id, object);
     }
 
-    frameScene(objects);
+    // Auto-frame only when the scene goes from empty to populated (initial
+    // load / first object) — reframing on every add/remove/edit would yank
+    // the camera out from under a user who's mid-comparison.
+    if (wasEmpty && objects.length > 0) {
+      frameScene(objects);
+    }
   }
 
   function frameScene(objects: readonly SizeObject[]): void {
