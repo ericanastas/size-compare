@@ -27,6 +27,7 @@ export interface SceneManager {
   onSelect(callback: (ids: string[]) => void): void;
   setProjection(mode: ProjectionMode): void;
   setStandardView(view: StandardView): void;
+  zoomExtents(): void;
   getPosition(id: string): { x: number; y: number; z: number } | null;
   resize(): void;
   render(): void;
@@ -38,6 +39,8 @@ export interface SceneManager {
 // hair off the pole; visually indistinguishable from a true top/bottom view, but it
 // keeps orbiting well-defined instead of rolling around the view axis.
 const POLE_TILT = 0.001;
+
+const DEFAULT_FRAME_DIRECTION = new THREE.Vector3(0.6, 0.45, 0.9).normalize();
 
 const STANDARD_VIEW_DIRECTIONS: Record<StandardView, THREE.Vector3> = {
   front: new THREE.Vector3(0, 0, 1),
@@ -464,38 +467,59 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     // load / first object) — reframing on every add/remove/edit would yank
     // the camera out from under a user who's mid-comparison.
     if (wasEmpty && objects.length > 0) {
-      frameScene(objects);
+      frameScene(computeBoundsBox());
     }
   }
 
-  function frameScene(objects: readonly SizeObject[]): void {
-    if (objects.length === 0) return;
-
+  // Reads live group positions (not the store's), matching updateGrid, so it
+  // reflects objects that have been dragged since the last store update.
+  function computeBoundsBox(): THREE.Box3 {
     const box = new THREE.Box3();
-    for (const object of objects) {
+    for (const [id, group] of groups) {
+      const object = lastSeen.get(id);
+      if (!object) continue;
       const halfWidth = object.width / 2;
       const halfHeight = object.height / 2;
       const halfDepth = object.depth / 2;
       box.expandByPoint(
         new THREE.Vector3(
-          object.position.x - halfWidth,
-          object.position.y - halfHeight,
-          object.position.z - halfDepth,
+          group.position.x - halfWidth,
+          group.position.y - halfHeight,
+          group.position.z - halfDepth,
         ),
       );
       box.expandByPoint(
         new THREE.Vector3(
-          object.position.x + halfWidth,
-          object.position.y + halfHeight,
-          object.position.z + halfDepth,
+          group.position.x + halfWidth,
+          group.position.y + halfHeight,
+          group.position.z + halfDepth,
         ),
       );
     }
+    return box;
+  }
+
+  // Zoom Extents pans and zooms to fit — it must not change which way the
+  // camera is looking, so it re-derives "direction" from the camera's
+  // current position relative to its current look-at point, instead of
+  // resetting to the default framing angle.
+  function zoomExtents(): void {
+    const box = computeBoundsBox();
+    box.expandByPoint(new THREE.Vector3(0, 0, 0));
+
+    const direction = camera.position.clone().sub(orbitControls.target);
+    if (direction.lengthSq() < 1e-6) direction.copy(DEFAULT_FRAME_DIRECTION);
+    else direction.normalize();
+
+    frameScene(box, direction);
+  }
+
+  function frameScene(box: THREE.Box3, direction: THREE.Vector3 = DEFAULT_FRAME_DIRECTION): void {
+    if (box.isEmpty()) return;
 
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 1);
-    const direction = new THREE.Vector3(0.6, 0.45, 0.9).normalize();
 
     const perspectiveDistance = radius / Math.sin((perspectiveCamera.fov * Math.PI) / 360) + radius;
     perspectiveCamera.position.copy(center).addScaledVector(direction, perspectiveDistance);
@@ -663,6 +687,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const labelGroup = document.createElement("div");
   labelGroup.className = "toolbar-group";
 
+  const zoomExtentsBtn = document.createElement("button");
+  zoomExtentsBtn.type = "button";
+  zoomExtentsBtn.textContent = "Zoom Extents";
+  zoomExtentsBtn.addEventListener("click", () => zoomExtents());
+
   const nameLabelsBtn = document.createElement("button");
   nameLabelsBtn.type = "button";
   nameLabelsBtn.textContent = "Show Names";
@@ -679,7 +708,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     updateToolbarUI();
   });
 
-  labelGroup.append(nameLabelsBtn, dimensionLabelsBtn);
+  labelGroup.append(zoomExtentsBtn, nameLabelsBtn, dimensionLabelsBtn);
 
   const topRow = document.createElement("div");
   topRow.className = "toolbar-row";
@@ -711,6 +740,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     onSelect: (callback) => selectListeners.push(callback),
     setProjection,
     setStandardView,
+    zoomExtents,
     getPosition,
     resize,
     render,
