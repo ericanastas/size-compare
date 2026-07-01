@@ -61,6 +61,16 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   transformControls.addEventListener("dragging-changed", (event) => {
     orbitControls.enabled = !event.value;
   });
+  transformControls.addEventListener("objectChange", () => {
+    if (!selectedId) return;
+    const object = lastSeen.get(selectedId);
+    const group = groups.get(selectedId);
+    if (!object || !group) return;
+    const minY = object.height / 2;
+    if (group.position.y < minY) {
+      group.position.y = minY;
+    }
+  });
 
   const groups = new Map<string, THREE.Group>();
   const lastSeen = new Map<string, SizeObject>();
