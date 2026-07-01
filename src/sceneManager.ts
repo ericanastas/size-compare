@@ -401,8 +401,22 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
+  // A click and the start of an orbit/pan drag both begin with the same
+  // pointerdown — only the pointerup position tells them apart. Selecting on
+  // pointerdown made every orbit drag clear or change the selection before
+  // the drag even happened.
+  const CLICK_DRAG_THRESHOLD = 5;
+  let pointerDownGesture: { x: number; y: number; skip: boolean } | null = null;
+
   renderer.domElement.addEventListener("pointerdown", (event) => {
-    if (transformControls.dragging) return;
+    pointerDownGesture = { x: event.clientX, y: event.clientY, skip: transformControls.dragging };
+  });
+
+  window.addEventListener("pointerup", (event) => {
+    const gesture = pointerDownGesture;
+    pointerDownGesture = null;
+    if (!gesture || gesture.skip) return;
+    if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > CLICK_DRAG_THRESHOLD) return;
 
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
