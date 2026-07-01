@@ -259,6 +259,8 @@ export function createSidebar(
   }
 
   function renderList(objects: readonly SizeObject[]): void {
+    saveButton.disabled = objects.length === 0;
+
     list.innerHTML = "";
     for (const object of objects) {
       const row = document.createElement("div");
