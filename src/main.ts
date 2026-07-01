@@ -11,17 +11,22 @@ if (!sidebarEl || !viewportEl) {
 
 const store = new ObjectStore();
 const sceneManager = createSceneManager(viewportEl);
+
+// Reflects live drag positions (from the scene), not just the store's last
+// known ones — used so Save CSV and the share link both capture what's
+// actually on screen right now.
+const getLiveObjects = () =>
+  store.objects.map((o) => ({
+    ...o,
+    position: sceneManager.getPosition(o.id) ?? o.position,
+  }));
+
 const sidebar = createSidebar(
   sidebarEl,
   store,
   (id, additive) => sceneManager.select(id, additive),
-  () =>
-    buildShareUrl(
-      store.objects.map((o) => ({
-        ...o,
-        position: sceneManager.getPosition(o.id) ?? o.position,
-      })),
-    ),
+  () => buildShareUrl(getLiveObjects()),
+  getLiveObjects,
 );
 
 store.subscribe((objects) => sceneManager.syncObjects(objects));

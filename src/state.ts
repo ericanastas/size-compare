@@ -67,10 +67,18 @@ export class ObjectStore {
     this.notify();
   }
 
-  load(rows: ReadonlyArray<{ name: string; width: number; height: number; depth: number }>): void {
+  load(
+    rows: ReadonlyArray<{
+      name: string;
+      width: number;
+      height: number;
+      depth: number;
+      position?: { x: number; y: number; z: number };
+    }>,
+  ): void {
     this.nextId = 1;
     this._objects = rows.map((row, index) =>
-      this.buildObject(row.name, row.width, row.height, row.depth, index),
+      this.buildObject(row.name, row.width, row.height, row.depth, index, row.position),
     );
     this.notify();
   }
@@ -84,13 +92,15 @@ export class ObjectStore {
   // New objects always spawn at the origin (resting on the ground plane)
   // rather than offset from existing ones — with units potentially varying
   // by orders of magnitude between objects, there's no sane fixed gap to
-  // place them apart by. The user drags them apart manually.
+  // place them apart by. The user drags them apart manually. An explicit
+  // position (e.g. from a loaded CSV) overrides that default.
   private buildObject(
     name: string,
     width: number,
     height: number,
     depth: number,
     colorIndex: number,
+    position?: { x: number; y: number; z: number },
   ): SizeObject {
     const id = String(this.nextId++);
 
@@ -101,7 +111,7 @@ export class ObjectStore {
       height,
       depth,
       color: colorForIndex(colorIndex),
-      position: { x: 0, y: height / 2, z: 0 },
+      position: position ?? { x: 0, y: height / 2, z: 0 },
     };
   }
 

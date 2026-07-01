@@ -1,8 +1,8 @@
-name,width,height,depth
-Accessory Box (1.68 qt),6.5,3.625,7.375
-Shoe Box (5.2 qt),7.5,4.25,13
-Tall Shoe Box 10.7 Qt,7.5,8.25,13
-Large Shoe Box (11 qt),10.125,5.625,14.75
-Sweater Box (18.5 qt),13.125,6.74,15.625
-Deep Sweater Box (36 qt),13.125,13.25,15.625
-Jumbo Box (74 qt),16,12.375,28.125
+name,width,depth,height,x,y,z
+Accessory Box (1.68 qt),6.5,7.375,3.625,0,1.813,0
+Shoe Box (5.2 qt),7.5,13,4.25,0,2.125,0
+Tall Shoe Box 10.7 Qt,7.5,13,8.25,0,4.125,0
+Large Shoe Box (11 qt),10.125,14.75,5.625,0,2.813,0
+Sweater Box (18.5 qt),13.125,15.625,6.74,0,3.37,0
+Deep Sweater Box (36 qt),13.125,15.625,13.25,0,6.625,0
+Jumbo Box (74 qt),16,28.125,12.375,0,6.188,0

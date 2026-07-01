@@ -46,6 +46,7 @@ export function createSidebar(
   store: ObjectStore,
   onSelectRequest: (id: string | null, additive?: boolean) => void,
   getShareUrl: () => string,
+  getLiveObjects: () => readonly SizeObject[],
 ): Sidebar {
   container.innerHTML = "";
 
@@ -118,7 +119,7 @@ export function createSidebar(
   container.appendChild(csvActions);
 
   saveButton.addEventListener("click", () => {
-    const csv = objectsToCsv(store.objects);
+    const csv = objectsToCsv(getLiveObjects());
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

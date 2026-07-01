@@ -1,17 +1,22 @@
 import type { SizeObject } from "./types";
 
-const HEADER = ["name", "width", "height", "depth"];
+const HEADER = ["name", "width", "depth", "height", "x", "y", "z"];
 
 export interface ShapeRow {
   name: string;
   width: number;
   height: number;
   depth: number;
+  position?: { x: number; y: number; z: number };
 }
 
 export interface ParseCsvResult {
   rows: ShapeRow[];
   skipped: number;
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function escapeCsvField(value: string): string {
@@ -25,7 +30,15 @@ export function objectsToCsv(objects: readonly SizeObject[]): string {
   const lines = [HEADER.join(",")];
   for (const object of objects) {
     lines.push(
-      [object.name, object.width, object.height, object.depth]
+      [
+        object.name,
+        object.width,
+        object.depth,
+        object.height,
+        round(object.position.x),
+        round(object.position.y),
+        round(object.position.z),
+      ]
         .map((value) => escapeCsvField(String(value)))
         .join(","),
     );
@@ -76,13 +89,21 @@ export function parseShapesCsv(text: string): ParseCsvResult {
     const fields = parseCsvLine(line);
     const name = (fields[0] ?? "").trim();
     const width = Number(fields[1]);
-    const height = Number(fields[2]);
-    const depth = Number(fields[3]);
+    const depth = Number(fields[2]);
+    const height = Number(fields[3]);
     if (!name || ![width, height, depth].every((n) => Number.isFinite(n) && n > 0)) {
       skipped++;
       continue;
     }
-    rows.push({ name, width, height, depth });
+
+    // Position columns are optional — older exports (or hand-edited files)
+    // may omit them, in which case the object falls back to the origin.
+    const x = Number(fields[4]);
+    const y = Number(fields[5]);
+    const z = Number(fields[6]);
+    const position = [x, y, z].every((n) => Number.isFinite(n)) ? { x, y, z } : undefined;
+
+    rows.push({ name, width, height, depth, position });
   }
   return { rows, skipped };
 }
