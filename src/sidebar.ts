@@ -151,6 +151,14 @@ export function createSidebar(
   list.className = "object-list";
   container.appendChild(list);
 
+  const clearListButton = document.createElement("button");
+  clearListButton.type = "button";
+  clearListButton.className = "clear-list-btn";
+  clearListButton.textContent = "Clear List";
+  clearListButton.hidden = true;
+  clearListButton.addEventListener("click", () => store.load([]));
+  container.appendChild(clearListButton);
+
   const shareActions = document.createElement("div");
   shareActions.className = "share-actions";
 
@@ -258,6 +266,7 @@ export function createSidebar(
 
   function renderList(objects: readonly SizeObject[]): void {
     saveButton.disabled = objects.length === 0;
+    clearListButton.hidden = objects.length === 0;
 
     list.innerHTML = "";
     for (const object of objects) {

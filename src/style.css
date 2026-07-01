@@ -185,6 +185,24 @@ h1 {
   gap: 6px;
 }
 
+.clear-list-btn {
+  width: 100%;
+  margin-top: 8px;
+  background: #2a2d34;
+  border: 1px solid #3a3f48;
+  border-radius: 4px;
+  color: #e6e8eb;
+  padding: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.clear-list-btn:hover {
+  background: #3a2226;
+  border-color: #5a2f34;
+  color: #e88b91;
+}
+
 .object-row {
   display: flex;
   align-items: center;
