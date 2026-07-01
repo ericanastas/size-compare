@@ -85,15 +85,37 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   directional.position.set(12, 20, 10);
   scene.add(directional);
 
-  const MIN_GRID_SIZE = 20;
+  // Target cell count — cell size is snapped to a power of ten (1, 10, 100,
+  // ...), so the actual division count can't hit this exactly, but whichever
+  // power of ten lands closest to it wins.
+  const TARGET_GRID_DIVISIONS = 20;
   const GRID_PADDING = 4;
+  const MIN_HALF_REACH = 10;
 
-  function createGrid(size: number): THREE.GridHelper {
-    return new THREE.GridHelper(size, size, 0x444444, 0x2a2d33);
+  function createGrid(size: number, divisions: number): THREE.GridHelper {
+    return new THREE.GridHelper(size, divisions, 0x444444, 0x2a2d33);
   }
 
-  let gridSize = MIN_GRID_SIZE;
-  let grid = createGrid(gridSize);
+  // Picks a power-of-ten cell size and however many of them are needed to
+  // cover `minCoverage`, choosing whichever power of ten leaves the
+  // resulting division count closest to TARGET_GRID_DIVISIONS.
+  function pickGrid(minCoverage: number): { size: number; divisions: number } {
+    let best = { size: minCoverage, divisions: 1 };
+    let bestDiff = Infinity;
+    for (let k = 0; k <= 6; k++) {
+      const cellSize = 10 ** k;
+      const divisions = Math.max(1, Math.ceil(minCoverage / cellSize));
+      const diff = Math.abs(divisions - TARGET_GRID_DIVISIONS);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = { size: cellSize * divisions, divisions };
+      }
+    }
+    return best;
+  }
+
+  let { size: gridSize, divisions: gridDivisions } = pickGrid(2 * (MIN_HALF_REACH + GRID_PADDING));
+  let grid = createGrid(gridSize, gridDivisions);
   scene.add(grid);
 
   // The grid's own origin always stays at the world origin — only its
@@ -102,7 +124,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   // live group positions (not the store's), so dragging an object past the
   // current edge grows the grid immediately, mid-drag.
   function updateGrid(): void {
-    let maxReach = MIN_GRID_SIZE / 2;
+    let maxReach = MIN_HALF_REACH;
     for (const [id, group] of groups) {
       const object = lastSeen.get(id);
       if (!object) continue;
@@ -112,14 +134,15 @@ export function createSceneManager(container: HTMLElement): SceneManager {
         Math.abs(group.position.z) + object.depth / 2,
       );
     }
-    const size = Math.ceil((maxReach + GRID_PADDING) * 2);
-    if (size === gridSize) return;
+    const { size, divisions } = pickGrid((maxReach + GRID_PADDING) * 2);
+    if (size === gridSize && divisions === gridDivisions) return;
 
     gridSize = size;
+    gridDivisions = divisions;
     scene.remove(grid);
     grid.geometry.dispose();
     (grid.material as THREE.Material).dispose();
-    grid = createGrid(gridSize);
+    grid = createGrid(gridSize, gridDivisions);
     scene.add(grid);
   }
 
