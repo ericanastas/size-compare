@@ -94,6 +94,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   const transformControls = new TransformControls(camera, renderer.domElement);
   transformControls.setMode("translate");
+  transformControls.setSize(0.5);
   scene.add(transformControls.getHelper());
 
   // When multiple objects are selected the gizmo attaches to this invisible
