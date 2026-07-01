@@ -1,17 +1,9 @@
 import type { SizeObject } from "./types";
+import { colorForIndex } from "./state";
 
 const PARAM = "state";
 
-interface EncodedObject {
-  n: string;
-  w: number;
-  h: number;
-  d: number;
-  c: number;
-  x: number;
-  y: number;
-  z: number;
-}
+type EncodedObject = [name: string, width: number, height: number, depth: number, x: number, y: number, z: number];
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
@@ -21,21 +13,34 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function base64UrlEncode(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(encoded: string): string {
+  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = (4 - (padded.length % 4)) % 4;
+  const binary = atob(padded + "=".repeat(padding));
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 export function buildShareUrl(objects: readonly SizeObject[]): string {
-  const payload: EncodedObject[] = objects.map((o) => ({
-    n: o.name,
-    w: o.width,
-    h: o.height,
-    d: o.depth,
-    c: o.color,
-    x: round(o.position.x),
-    y: round(o.position.y),
-    z: round(o.position.z),
-  }));
+  const payload: EncodedObject[] = objects.map((o) => [
+    o.name,
+    o.width,
+    o.height,
+    o.depth,
+    round(o.position.x),
+    round(o.position.y),
+    round(o.position.z),
+  ]);
 
   const url = new URL(window.location.href);
   url.search = "";
-  url.searchParams.set(PARAM, JSON.stringify(payload));
+  url.searchParams.set(PARAM, base64UrlEncode(JSON.stringify(payload)));
   return url.toString();
 }
 
@@ -45,7 +50,7 @@ export function decodeStateFromLocation(): SizeObject[] | null {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(base64UrlDecode(raw));
   } catch {
     return null;
   }
@@ -53,25 +58,24 @@ export function decodeStateFromLocation(): SizeObject[] | null {
 
   const objects: SizeObject[] = [];
   let nextId = 1;
-  for (const item of parsed as EncodedObject[]) {
-    if (
-      !item ||
-      typeof item.n !== "string" ||
-      !item.n ||
-      ![item.w, item.h, item.d].every((n) => isFiniteNumber(n) && n > 0) ||
-      !isFiniteNumber(item.c) ||
-      ![item.x, item.y, item.z].every(isFiniteNumber)
-    ) {
-      continue;
-    }
+  for (const item of parsed as unknown[]) {
+    if (!Array.isArray(item) || item.length !== 7) continue;
+    const [name, width, height, depth, x, y, z] = item as unknown[];
+    if (typeof name !== "string" || !name) continue;
+    if (!isFiniteNumber(width) || width <= 0) continue;
+    if (!isFiniteNumber(height) || height <= 0) continue;
+    if (!isFiniteNumber(depth) || depth <= 0) continue;
+    if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(z)) continue;
+
+    const index = objects.length;
     objects.push({
       id: String(nextId++),
-      name: item.n,
-      width: item.w,
-      height: item.h,
-      depth: item.d,
-      color: item.c,
-      position: { x: item.x, y: item.y, z: item.z },
+      name,
+      width,
+      height,
+      depth,
+      color: colorForIndex(index),
+      position: { x, y, z },
     });
   }
 

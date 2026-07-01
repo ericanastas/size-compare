@@ -4,7 +4,7 @@ const GAP = 2;
 const PALETTE_SATURATION = 0.65;
 const PALETTE_LIGHTNESS = 0.55;
 
-function colorForIndex(index: number): number {
+export function colorForIndex(index: number): number {
   const hue = (index * 0.137) % 1;
   const color = { r: 0, g: 0, b: 0 };
   hslToRgb(hue, PALETTE_SATURATION, PALETTE_LIGHTNESS, color);
