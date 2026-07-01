@@ -6,15 +6,16 @@ import type { SizeObject } from "./types";
 
 const BOX_OPACITY = 0.35;
 const SELECTION_OUTLINE_COLOR = 0x4a7dfc;
-const GRIP_COLOR = 0xffa726;
-const GRIP_RADIUS_FACTOR = 0.08;
+const FACE_HIGHLIGHT_COLOR = 0xffa726;
+const FACE_HIGHLIGHT_OPACITY = 0.4;
 const MIN_DIMENSION = 0.01;
 
-// Shared unit-sphere geometry for every grip on every object — grips are
-// sized via mesh.scale (world radius = scale, since this geometry has
-// radius 1), never by regenerating geometry, so there's nothing per-object
-// to dispose beyond each grip's own material.
-const GRIP_GEOMETRY = new THREE.SphereGeometry(1, 12, 8);
+// Shared unit-plane geometry for every face handle on every object — each
+// handle is oriented (rotation, set once at creation) and sized (non-uniform
+// scale, updated on every reposition) via its transform, never by
+// regenerating geometry, so there's nothing per-object to dispose beyond
+// each handle's own material.
+const FACE_HANDLE_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 
 type FaceAxis = { axis: "x" | "y" | "z"; sign: 1 | -1 };
 
@@ -41,8 +42,27 @@ function gripLocalPosition(
   return position;
 }
 
-function gripRadius(object: { width: number; height: number; depth: number }): number {
-  return Math.min(object.width, object.height, object.depth) * GRIP_RADIUS_FACTOR;
+// A PlaneGeometry(1,1) lies in its local XY plane (normal along local +Z).
+// Rotating it so that normal points along a given world axis leaves its
+// local X/Y scale axes spanning two of the *other* world axes — this table
+// is exactly that mapping, so scaling by (u, v, 1) after this rotation
+// stretches the plane to that face's real rectangle. Rotation only depends
+// on axis (not sign): +X/-X use the identical rotation, only position
+// differs — the material is DoubleSide + unlit, so the exact rotation sign
+// is visually irrelevant.
+function faceHandleRotation(face: FaceAxis): THREE.Euler {
+  if (face.axis === "x") return new THREE.Euler(0, Math.PI / 2, 0);
+  if (face.axis === "y") return new THREE.Euler(-Math.PI / 2, 0, 0);
+  return new THREE.Euler(0, 0, 0);
+}
+
+function faceHandleScale(
+  object: { width: number; height: number; depth: number },
+  face: FaceAxis,
+): { u: number; v: number } {
+  if (face.axis === "x") return { u: object.depth, v: object.height };
+  if (face.axis === "y") return { u: object.width, v: object.depth };
+  return { u: object.width, v: object.height };
 }
 
 interface GroupParts {
@@ -89,11 +109,15 @@ function rebuildGeometry(
   (parts.edges.material as THREE.LineBasicMaterial).color.setHex(object.color);
 }
 
-function repositionGrips(grips: readonly THREE.Mesh[], object: { width: number; height: number; depth: number }): void {
-  const radius = gripRadius(object);
+function repositionFaceHandles(
+  faceHandles: readonly THREE.Mesh[],
+  object: { width: number; height: number; depth: number },
+): void {
   for (let i = 0; i < FACES.length; i++) {
-    grips[i].position.copy(gripLocalPosition(object, FACES[i]));
-    grips[i].scale.setScalar(radius);
+    const face = FACES[i];
+    const { u, v } = faceHandleScale(object, face);
+    faceHandles[i].position.copy(gripLocalPosition(object, face));
+    faceHandles[i].scale.set(u, v, 1);
   }
 }
 
@@ -390,8 +414,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const groups = new Map<string, THREE.Group>();
   const lastSeen = new Map<string, SizeObject>();
   const meshToId = new Map<THREE.Mesh, string>();
-  const gripToFace = new Map<THREE.Mesh, FaceAxis>();
-  const gripToId = new Map<THREE.Mesh, string>();
+  const faceHandleToFace = new Map<THREE.Mesh, FaceAxis>();
+  const faceHandleToId = new Map<THREE.Mesh, string>();
   // Live width/height/depth during a resize-drag, read by computeBoundsBox
   // and getDimensions in preference to lastSeen (which — like groups does
   // for position during any drag — is never updated mid-drag, only by
@@ -462,22 +486,35 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     selectionOutline.visible = false;
     group.add(selectionOutline);
 
-    // Resize grips — one per face, only shown for a single-object selection
-    // (toggled in applySelectionState). depthTest:false keeps them clickable
-    // regardless of display style or occlusion, same reasoning as
-    // selectionOutline above.
-    const grips = FACES.map((face) => {
-      const grip = new THREE.Mesh(GRIP_GEOMETRY, new THREE.MeshBasicMaterial({ color: GRIP_COLOR, depthTest: false }));
-      grip.userData.role = "grip";
-      grip.visible = false;
-      grip.position.copy(gripLocalPosition(object, face));
-      grip.scale.setScalar(gripRadius(object));
-      group.add(grip);
-      gripToFace.set(grip, face);
-      gripToId.set(grip, object.id);
-      return grip;
+    // Resize face handles — one per face, covering the whole face (not a
+    // small grip on it), only shown for a single-object selection (toggled
+    // in applySelectionState) and only *visible* (opacity) while hovered —
+    // otherwise fully transparent so there's no permanent visual clutter.
+    // depthTest:false keeps them clickable regardless of display style or
+    // occlusion, same reasoning as selectionOutline above.
+    const faceHandles = FACES.map((face) => {
+      const handle = new THREE.Mesh(
+        FACE_HANDLE_GEOMETRY,
+        new THREE.MeshBasicMaterial({
+          color: FACE_HIGHLIGHT_COLOR,
+          transparent: true,
+          opacity: 0,
+          depthTest: false,
+          side: THREE.DoubleSide,
+        }),
+      );
+      handle.userData.role = "faceHandle";
+      handle.visible = false;
+      handle.rotation.copy(faceHandleRotation(face));
+      handle.position.copy(gripLocalPosition(object, face));
+      const { u, v } = faceHandleScale(object, face);
+      handle.scale.set(u, v, 1);
+      group.add(handle);
+      faceHandleToFace.set(handle, face);
+      faceHandleToId.set(handle, object.id);
+      return handle;
     });
-    group.userData.grips = grips;
+    group.userData.faceHandles = faceHandles;
 
     const labelEl = document.createElement("div");
     labelEl.className = "object-label";
@@ -535,7 +572,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     if (!parts) return;
 
     rebuildGeometry(object, parts);
-    repositionGrips((group.userData.grips as THREE.Mesh[] | undefined) ?? [], object);
+    repositionFaceHandles((group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [], object);
 
     parts.nameLabel.element.textContent = object.name;
     parts.nameLabel.position.set(0, 0, 0);
@@ -566,13 +603,14 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   function disposeGroup(group: THREE.Group): void {
     group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        // Grips share GRIP_GEOMETRY across every object — disposing it here
-        // would break every other still-alive object's grips.
-        if (child.userData.role !== "grip") child.geometry.dispose();
+        // Face handles share FACE_HANDLE_GEOMETRY across every object —
+        // disposing it here would break every other still-alive object's
+        // handles.
+        if (child.userData.role !== "faceHandle") child.geometry.dispose();
         (child.material as THREE.Material).dispose();
         meshToId.delete(child);
-        gripToFace.delete(child);
-        gripToId.delete(child);
+        faceHandleToFace.delete(child);
+        faceHandleToId.delete(child);
       } else if (child instanceof THREE.LineSegments) {
         child.geometry.dispose();
         (child.material as THREE.Material).dispose();
@@ -589,11 +627,15 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       );
       if (outline) outline.visible = selectedIds.has(id);
 
-      // Resize grips only ever show for a single-object selection.
-      const grips = (group.userData.grips as THREE.Mesh[] | undefined) ?? [];
-      const showGrips = selectedIds.size === 1 && selectedIds.has(id);
-      for (const grip of grips) grip.visible = showGrips;
+      // Resize face handles only ever show for a single-object selection.
+      const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
+      const showFaceHandles = selectedIds.size === 1 && selectedIds.has(id);
+      for (const handle of faceHandles) handle.visible = showFaceHandles;
     }
+
+    // Selection changed — don't leave a stale highlight on a face that's
+    // no longer shown (e.g. selection moved to a different object).
+    setHoveredFaceHandle(null);
 
     if (selectedIds.size === 1) {
       const [id] = selectedIds;
@@ -864,26 +906,57 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     startDepth: number;
     startPosition: THREE.Vector3;
     parts: GroupParts;
-    grips: THREE.Mesh[];
+    faceHandles: THREE.Mesh[];
   }
   let resizeDrag: ResizeDragState | null = null;
 
-  // Raycasts only the currently-selected object's grips (never the whole
-  // scene's grips — only one group's are ever visible at a time anyway).
-  function hitTestGrip(event: PointerEvent): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
+  let hoveredFaceHandle: THREE.Mesh | null = null;
+
+  function setHoveredFaceHandle(handle: THREE.Mesh | null): void {
+    if (hoveredFaceHandle === handle) return;
+    if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = 0;
+    hoveredFaceHandle = handle;
+    if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = FACE_HIGHLIGHT_OPACITY;
+    renderer.domElement.style.cursor = handle ? "pointer" : "";
+  }
+
+  // Raycasts only the currently-selected object's face handles (never the
+  // whole scene's — only one group's are ever visible at a time anyway).
+  // Reused for both starting a drag (pointerdown) and hover detection.
+  function hitTestFaceHandle(event: PointerEvent): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
     if (selectedIds.size !== 1) return null;
     const [id] = selectedIds;
     const group = groups.get(id);
     if (!group) return null;
-    const grips = (group.userData.grips as THREE.Mesh[] | undefined) ?? [];
+    const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
 
     setPointerFromEvent(event);
-    const hits = raycaster.intersectObjects(grips, false);
+    const hits = raycaster.intersectObjects(faceHandles, false);
     if (hits.length === 0) return null;
     const grip = hits[0].object as THREE.Mesh;
-    const face = gripToFace.get(grip);
+    const face = faceHandleToFace.get(grip);
     return face ? { id, face, grip } : null;
   }
+
+  // Hover highlight — deliberately on renderer.domElement, not window, since
+  // hover is only meaningful while actually over the canvas. Skips while any
+  // drag (orbit, translate, or resize) is in progress: event.buttons !== 0
+  // covers orbit/translate (this always fires alongside their own
+  // listeners), and the resizeDrag/transformControls.dragging checks cover
+  // the rest. Because of this guard, whichever face is highlighted when a
+  // resize-drag starts (set explicitly in startResizeDrag) simply stays
+  // highlighted for the whole drag, for free.
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    if (event.buttons !== 0 || resizeDrag || transformControls.dragging) return;
+    if (selectedIds.size !== 1) {
+      setHoveredFaceHandle(null);
+      return;
+    }
+    const hit = hitTestFaceHandle(event);
+    setHoveredFaceHandle(hit ? hit.grip : null);
+  });
+
+  renderer.domElement.addEventListener("pointerleave", () => setHoveredFaceHandle(null));
 
   // Builds the same axis-constrained drag plane TransformControlsPlane uses
   // internally for single-axis translate (verified against
@@ -925,9 +998,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       startDepth: object.depth,
       startPosition: group.position.clone(),
       parts,
-      grips: (group.userData.grips as THREE.Mesh[] | undefined) ?? [],
+      faceHandles: (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [],
     };
     orbitControls.enabled = false;
+    setHoveredFaceHandle(hit.grip);
     return true;
   }
 
@@ -974,7 +1048,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     group.position.copy(newPosition);
     const scratch: SizeObject = { ...lastObject, width: newWidth, height: newHeight, depth: newDepth, position: newPosition };
     rebuildGeometry(scratch, resizeDrag.parts);
-    repositionGrips(resizeDrag.grips, scratch);
+    repositionFaceHandles(resizeDrag.faceHandles, scratch);
     updateDimensionLabels(resizeDrag.parts.widthLabel, resizeDrag.parts.heightLabel, resizeDrag.parts.depthLabel, scratch);
 
     liveDimensions.set(resizeDrag.id, { width: newWidth, height: newHeight, depth: newDepth });
@@ -1007,7 +1081,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       return;
     }
 
-    const grip = hitTestGrip(event);
+    const grip = hitTestFaceHandle(event);
     if (grip && startResizeDrag(grip)) {
       pointerDownGesture = { x: event.clientX, y: event.clientY, skip: true };
       return;
