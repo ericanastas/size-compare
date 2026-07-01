@@ -85,8 +85,43 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   directional.position.set(12, 20, 10);
   scene.add(directional);
 
-  const grid = new THREE.GridHelper(60, 60, 0x444444, 0x2a2d33);
+  const MIN_GRID_SIZE = 20;
+  const GRID_PADDING = 4;
+
+  function createGrid(size: number): THREE.GridHelper {
+    return new THREE.GridHelper(size, size, 0x444444, 0x2a2d33);
+  }
+
+  let gridSize = MIN_GRID_SIZE;
+  let grid = createGrid(gridSize);
   scene.add(grid);
+
+  // The grid's own origin always stays at the world origin — only its
+  // extent grows or shrinks to comfortably cover how far objects reach from
+  // there, so it never has to re-center itself around the objects. Reads
+  // live group positions (not the store's), so dragging an object past the
+  // current edge grows the grid immediately, mid-drag.
+  function updateGrid(): void {
+    let maxReach = MIN_GRID_SIZE / 2;
+    for (const [id, group] of groups) {
+      const object = lastSeen.get(id);
+      if (!object) continue;
+      maxReach = Math.max(
+        maxReach,
+        Math.abs(group.position.x) + object.width / 2,
+        Math.abs(group.position.z) + object.depth / 2,
+      );
+    }
+    const size = Math.ceil((maxReach + GRID_PADDING) * 2);
+    if (size === gridSize) return;
+
+    gridSize = size;
+    scene.remove(grid);
+    grid.geometry.dispose();
+    (grid.material as THREE.Material).dispose();
+    grid = createGrid(gridSize);
+    scene.add(grid);
+  }
 
   const orbitControls = new OrbitControls(camera, renderer.domElement);
   orbitControls.target.set(0, 2, 0);
@@ -142,6 +177,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
         group.position.copy(startPosition).add(delta);
       }
       multiSelectProxy.position.y = multiDragStart.proxyPosition.y + deltaY;
+      updateGrid();
       return;
     }
 
@@ -153,6 +189,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     if (group.position.y < minY) {
       group.position.y = minY;
     }
+    updateGrid();
   });
 
   const groups = new Map<string, THREE.Group>();
@@ -394,6 +431,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       }
       lastSeen.set(object.id, object);
     }
+
+    updateGrid();
 
     // Auto-frame only when the scene goes from empty to populated (initial
     // load / first object) — reframing on every add/remove/edit would yank
