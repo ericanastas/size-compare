@@ -82,8 +82,8 @@ export function createSidebar(
   form.append(
     nameField.wrapper,
     widthField.wrapper,
-    heightField.wrapper,
     depthField.wrapper,
+    heightField.wrapper,
     error,
     formButtons,
   );
@@ -272,7 +272,7 @@ export function createSidebar(
       nameEl.textContent = object.name;
       const dimsEl = document.createElement("div");
       dimsEl.className = "dims";
-      dimsEl.textContent = `${object.width} × ${object.height} × ${object.depth}`;
+      dimsEl.textContent = `${object.width} × ${object.depth} × ${object.height}`;
       info.append(nameEl, dimsEl);
 
       const removeButton = document.createElement("button");
