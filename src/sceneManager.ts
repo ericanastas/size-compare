@@ -426,6 +426,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let attachedId: string | null = null;
   let showNameLabels = true;
   let showDimensionLabels = true;
+  let freeResizeEnabled = false;
   let displayStyle: DisplayStyle = "transparent";
   let currentStandardView: StandardView | null = null;
 
@@ -600,6 +601,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     applyLabelVisibility();
   }
 
+  function setFreeResizeEnabled(enabled: boolean): void {
+    freeResizeEnabled = enabled;
+    applySelectionState();
+  }
+
   function disposeGroup(group: THREE.Group): void {
     group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
@@ -629,7 +635,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
       // Resize face handles only ever show for a single-object selection.
       const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
-      const showFaceHandles = selectedIds.size === 1 && selectedIds.has(id);
+      const showFaceHandles = freeResizeEnabled && selectedIds.size === 1 && selectedIds.has(id);
       for (const handle of faceHandles) handle.visible = showFaceHandles;
     }
 
@@ -924,7 +930,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   // whole scene's — only one group's are ever visible at a time anyway).
   // Reused for both starting a drag (pointerdown) and hover detection.
   function hitTestFaceHandle(event: PointerEvent): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
-    if (selectedIds.size !== 1) return null;
+    if (!freeResizeEnabled || selectedIds.size !== 1) return null;
     const [id] = selectedIds;
     const group = groups.get(id);
     if (!group) return null;
@@ -1213,7 +1219,15 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     updateToolbarUI();
   });
 
-  labelGroup.append(zoomExtentsBtn, nameLabelsBtn, dimensionLabelsBtn);
+  const freeResizeBtn = document.createElement("button");
+  freeResizeBtn.type = "button";
+  freeResizeBtn.textContent = "Free Resize";
+  freeResizeBtn.addEventListener("click", () => {
+    setFreeResizeEnabled(!freeResizeEnabled);
+    updateToolbarUI();
+  });
+
+  labelGroup.append(zoomExtentsBtn, nameLabelsBtn, dimensionLabelsBtn, freeResizeBtn);
 
   const topRow = document.createElement("div");
   topRow.className = "toolbar-row";
@@ -1233,6 +1247,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     for (const { style, btn } of displayStyleButtons) btn.classList.toggle("active", displayStyle === style);
     nameLabelsBtn.classList.toggle("active", showNameLabels);
     dimensionLabelsBtn.classList.toggle("active", showDimensionLabels);
+    freeResizeBtn.classList.toggle("active", freeResizeEnabled);
   }
 
   updateToolbarUI();
