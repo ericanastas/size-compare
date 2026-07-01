@@ -5,6 +5,7 @@ import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer
 import type { SizeObject } from "./types";
 
 const BOX_OPACITY = 0.35;
+const SELECTION_OUTLINE_COLOR = 0x4a7dfc;
 
 function hasDimensionsChanged(previous: SizeObject | undefined, current: SizeObject): boolean {
   if (!previous) return false;
@@ -22,8 +23,8 @@ export type StandardView = "front" | "back" | "top" | "bottom" | "left" | "right
 
 export interface SceneManager {
   syncObjects(objects: readonly SizeObject[]): void;
-  select(id: string | null): void;
-  onSelect(callback: (id: string | null) => void): void;
+  select(id: string | null, additive?: boolean): void;
+  onSelect(callback: (ids: string[]) => void): void;
   setProjection(mode: ProjectionMode): void;
   setStandardView(view: StandardView): void;
   getPosition(id: string): { x: number; y: number; z: number } | null;
@@ -98,9 +99,9 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orbitControls.enabled = !event.value;
   });
   transformControls.addEventListener("objectChange", () => {
-    if (!selectedId) return;
-    const object = lastSeen.get(selectedId);
-    const group = groups.get(selectedId);
+    if (!attachedId) return;
+    const object = lastSeen.get(attachedId);
+    const group = groups.get(attachedId);
     if (!object || !group) return;
     const minY = object.height / 2;
     if (group.position.y < minY) {
@@ -111,8 +112,9 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const groups = new Map<string, THREE.Group>();
   const lastSeen = new Map<string, SizeObject>();
   const meshToId = new Map<THREE.Mesh, string>();
-  const selectListeners: Array<(id: string | null) => void> = [];
-  let selectedId: string | null = null;
+  const selectListeners: Array<(ids: string[]) => void> = [];
+  const selectedIds = new Set<string>();
+  let attachedId: string | null = null;
 
   function buildGroup(object: SizeObject): THREE.Group {
     const group = new THREE.Group();
@@ -130,11 +132,18 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     group.add(mesh);
     meshToId.set(mesh, object.id);
 
-    const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({ color: object.color }),
-    );
+    const edgesGeometry = new THREE.EdgesGeometry(geometry);
+    const edges = new THREE.LineSegments(edgesGeometry, new THREE.LineBasicMaterial({ color: object.color }));
+    edges.userData.role = "edges";
     group.add(edges);
+
+    const selectionOutline = new THREE.LineSegments(
+      edgesGeometry,
+      new THREE.LineBasicMaterial({ color: SELECTION_OUTLINE_COLOR, depthTest: false }),
+    );
+    selectionOutline.userData.role = "selectionOutline";
+    selectionOutline.visible = false;
+    group.add(selectionOutline);
 
     const labelEl = document.createElement("div");
     labelEl.className = "object-label";
@@ -181,20 +190,24 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   function updateGroup(group: THREE.Group, object: SizeObject): void {
     const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
-    const edges = group.children.find((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
+    const lineSegments = group.children.filter((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
+    const edges = lineSegments.find((l) => l.userData.role === "edges");
+    const selectionOutline = lineSegments.find((l) => l.userData.role === "selectionOutline");
     const labels = group.children.filter((c): c is CSS2DObject => c instanceof CSS2DObject);
     const label = labels.find((l) => l.element.classList.contains("object-label"));
     const widthLabel = labels.find((l) => l.element.classList.contains("dimension-label--width"));
     const heightLabel = labels.find((l) => l.element.classList.contains("dimension-label--height"));
     const depthLabel = labels.find((l) => l.element.classList.contains("dimension-label--depth"));
-    if (!mesh || !edges || !label || !widthLabel || !heightLabel || !depthLabel) return;
+    if (!mesh || !edges || !selectionOutline || !label || !widthLabel || !heightLabel || !depthLabel) return;
 
     mesh.geometry.dispose();
     mesh.geometry = new THREE.BoxGeometry(object.width, object.height, object.depth);
     (mesh.material as THREE.MeshStandardMaterial).color.setHex(object.color);
 
     edges.geometry.dispose();
-    edges.geometry = new THREE.EdgesGeometry(mesh.geometry);
+    const edgesGeometry = new THREE.EdgesGeometry(mesh.geometry);
+    edges.geometry = edgesGeometry;
+    selectionOutline.geometry = edgesGeometry;
     (edges.material as THREE.LineBasicMaterial).color.setHex(object.color);
 
     label.element.textContent = object.name;
@@ -218,29 +231,61 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     });
   }
 
-  function select(id: string | null): void {
-    selectedId = id;
-    const group = id ? groups.get(id) ?? null : null;
-    if (group) {
-      transformControls.attach(group);
+  function applySelectionState(): void {
+    for (const [id, group] of groups) {
+      const outline = group.children.find(
+        (c): c is THREE.LineSegments => c instanceof THREE.LineSegments && c.userData.role === "selectionOutline",
+      );
+      if (outline) outline.visible = selectedIds.has(id);
+    }
+
+    if (selectedIds.size === 1) {
+      const [id] = selectedIds;
+      const group = groups.get(id);
+      attachedId = group ? id : null;
+      if (group) {
+        transformControls.attach(group);
+      } else {
+        transformControls.detach();
+      }
     } else {
+      attachedId = null;
       transformControls.detach();
     }
-    for (const listener of selectListeners) listener(selectedId);
+
+    for (const listener of selectListeners) listener(Array.from(selectedIds));
+  }
+
+  function select(id: string | null, additive = false): void {
+    if (id === null) {
+      selectedIds.clear();
+    } else if (additive) {
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        selectedIds.add(id);
+      }
+    } else {
+      selectedIds.clear();
+      selectedIds.add(id);
+    }
+    applySelectionState();
   }
 
   function syncObjects(objects: readonly SizeObject[]): void {
     const currentIds = new Set(objects.map((o) => o.id));
 
+    let removedSelected = false;
     for (const [id, group] of groups) {
       if (!currentIds.has(id)) {
-        if (selectedId === id) select(null);
+        if (selectedIds.delete(id)) removedSelected = true;
         disposeGroup(group);
         scene.remove(group);
         groups.delete(id);
         lastSeen.delete(id);
       }
     }
+    if (removedSelected) applySelectionState();
 
     for (const object of objects) {
       const existing = groups.get(object.id);
@@ -366,10 +411,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     raycaster.setFromCamera(pointer, camera);
     const meshes = Array.from(meshToId.keys());
     const intersections = raycaster.intersectObjects(meshes, false);
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
 
     if (intersections.length > 0) {
       const mesh = intersections[0].object as THREE.Mesh;
-      select(meshToId.get(mesh) ?? null);
+      const id = meshToId.get(mesh) ?? null;
+      if (id) select(id, additive);
+      else select(null);
     } else {
       select(null);
     }

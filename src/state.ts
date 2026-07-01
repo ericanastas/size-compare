@@ -49,12 +49,23 @@ export class ObjectStore {
     this.notify();
   }
 
-  update(id: string, name: string, width: number, height: number, depth: number): void {
-    this._objects = this._objects.map((o) =>
-      o.id === id
-        ? { ...o, name, width, height, depth, position: { ...o.position, y: height / 2 } }
-        : o,
-    );
+  updateMany(
+    ids: readonly string[],
+    patch: { name?: string; width?: number; height?: number; depth?: number },
+  ): void {
+    const idSet = new Set(ids);
+    this._objects = this._objects.map((o) => {
+      if (!idSet.has(o.id)) return o;
+      const height = patch.height ?? o.height;
+      return {
+        ...o,
+        name: patch.name ?? o.name,
+        width: patch.width ?? o.width,
+        height,
+        depth: patch.depth ?? o.depth,
+        position: { ...o.position, y: height / 2 },
+      };
+    });
     this.notify();
   }
 

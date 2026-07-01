@@ -1,8 +1,22 @@
 import type { ObjectStore } from "./state";
+import type { SizeObject } from "./types";
 import { objectsToCsv, parseShapesCsv } from "./csv";
 
 export interface Sidebar {
-  setSelected(id: string | null): void;
+  setSelected(ids: readonly string[]): void;
+}
+
+const VARIES_HINT = "<Varies>";
+
+function setFieldValue(input: HTMLInputElement, values: readonly string[]): void {
+  const allSame = values.every((v) => v === values[0]);
+  if (allSame) {
+    input.value = values[0];
+    input.placeholder = "";
+  } else {
+    input.value = "";
+    input.placeholder = VARIES_HINT;
+  }
 }
 
 function hexColor(color: number): string {
@@ -29,7 +43,7 @@ function field(labelText: string, type: string, defaultValue: string): { wrapper
 export function createSidebar(
   container: HTMLElement,
   store: ObjectStore,
-  onSelectRequest: (id: string | null) => void,
+  onSelectRequest: (id: string | null, additive?: boolean) => void,
   getShareUrl: () => string,
 ): Sidebar {
   container.innerHTML = "";
@@ -157,10 +171,38 @@ export function createSidebar(
   list.className = "object-list";
   container.appendChild(list);
 
-  let selectedId: string | null = null;
+  let selectedIds: readonly string[] = [];
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+
+    if (selectedIds.length > 0) {
+      const nameRaw = nameField.input.value.trim();
+      const widthRaw = widthField.input.value.trim();
+      const heightRaw = heightField.input.value.trim();
+      const depthRaw = depthField.input.value.trim();
+
+      const patch: { name?: string; width?: number; height?: number; depth?: number } = {};
+      if (nameRaw) patch.name = nameRaw;
+      for (const [raw, key] of [
+        [widthRaw, "width"],
+        [heightRaw, "height"],
+        [depthRaw, "depth"],
+      ] as const) {
+        if (raw === "") continue;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) {
+          error.textContent = "Width, height, and depth must be positive numbers.";
+          return;
+        }
+        patch[key] = n;
+      }
+
+      error.textContent = "";
+      store.updateMany(selectedIds, patch);
+      return;
+    }
+
     const name = nameField.input.value.trim();
     const width = Number(widthField.input.value);
     const height = Number(heightField.input.value);
@@ -176,44 +218,47 @@ export function createSidebar(
     }
 
     error.textContent = "";
-    if (selectedId) {
-      store.update(selectedId, name, width, height, depth);
-    } else {
-      store.add(name, width, height, depth);
-      form.reset();
-      widthField.input.value = "1";
-      heightField.input.value = "1";
-      depthField.input.value = "1";
-      nameField.input.focus();
-    }
+    store.add(name, width, height, depth);
+    form.reset();
+    widthField.input.value = "1";
+    heightField.input.value = "1";
+    depthField.input.value = "1";
+    nameField.input.focus();
   });
 
   function applyFormMode(): void {
     error.textContent = "";
-    const object = selectedId ? store.objects.find((o) => o.id === selectedId) : undefined;
-    if (object) {
-      nameField.input.value = object.name;
-      widthField.input.value = String(object.width);
-      heightField.input.value = String(object.height);
-      depthField.input.value = String(object.depth);
-      submitButton.textContent = "Update object";
+    const selected = selectedIds
+      .map((id) => store.objects.find((o) => o.id === id))
+      .filter((o): o is SizeObject => Boolean(o));
+
+    if (selected.length > 0) {
+      setFieldValue(nameField.input, selected.map((o) => o.name));
+      setFieldValue(widthField.input, selected.map((o) => String(o.width)));
+      setFieldValue(heightField.input, selected.map((o) => String(o.height)));
+      setFieldValue(depthField.input, selected.map((o) => String(o.depth)));
+      submitButton.textContent = selected.length > 1 ? `Update ${selected.length} objects` : "Update object";
       cancelButton.hidden = false;
     } else {
       nameField.input.value = "";
+      nameField.input.placeholder = "";
       widthField.input.value = "1";
+      widthField.input.placeholder = "";
       heightField.input.value = "1";
+      heightField.input.placeholder = "";
       depthField.input.value = "1";
+      depthField.input.placeholder = "";
       submitButton.textContent = "Add object";
       cancelButton.hidden = true;
     }
   }
 
-  function renderList(objects: readonly import("./types").SizeObject[]): void {
+  function renderList(objects: readonly SizeObject[]): void {
     list.innerHTML = "";
     for (const object of objects) {
       const row = document.createElement("div");
       row.className = "object-row";
-      row.classList.toggle("selected", object.id === selectedId);
+      row.classList.toggle("selected", selectedIds.includes(object.id));
       row.dataset.id = object.id;
 
       const swatch = document.createElement("span");
@@ -240,7 +285,9 @@ export function createSidebar(
         store.remove(object.id);
       });
 
-      row.addEventListener("click", () => onSelectRequest(object.id));
+      row.addEventListener("click", (event) => {
+        onSelectRequest(object.id, event.shiftKey || event.ctrlKey || event.metaKey);
+      });
 
       row.append(swatch, info, removeButton);
       list.appendChild(row);
@@ -250,11 +297,11 @@ export function createSidebar(
   store.subscribe(renderList);
 
   return {
-    setSelected(id) {
-      selectedId = id;
+    setSelected(ids) {
+      selectedIds = ids;
       for (const child of Array.from(list.children)) {
         const row = child as HTMLElement;
-        row.classList.toggle("selected", row.dataset.id === id);
+        row.classList.toggle("selected", ids.includes(row.dataset.id ?? ""));
       }
       applyFormMode();
     },

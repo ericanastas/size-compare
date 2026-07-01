@@ -14,7 +14,7 @@ const sceneManager = createSceneManager(viewportEl);
 const sidebar = createSidebar(
   sidebarEl,
   store,
-  (id) => sceneManager.select(id),
+  (id, additive) => sceneManager.select(id, additive),
   () =>
     buildShareUrl(
       store.objects.map((o) => ({
@@ -25,7 +25,7 @@ const sidebar = createSidebar(
 );
 
 store.subscribe((objects) => sceneManager.syncObjects(objects));
-sceneManager.onSelect((id) => sidebar.setSelected(id));
+sceneManager.onSelect((ids) => sidebar.setSelected(ids));
 
 const sharedObjects = decodeStateFromLocation();
 if (sharedObjects) {
