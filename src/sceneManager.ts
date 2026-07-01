@@ -351,8 +351,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let multiDragStart: { proxyPosition: THREE.Vector3; groupPositions: Map<string, THREE.Vector3> } | null = null;
   const dragEndListeners: Array<() => void> = [];
 
+  transformControls.addEventListener("axis-changed", () => updateCursor());
+
   transformControls.addEventListener("dragging-changed", (event) => {
     orbitControls.enabled = !event.value;
+    updateCursor();
 
     if (event.value && selectedIds.size > 1) {
       const groupPositions = new Map<string, THREE.Vector3>();
@@ -918,12 +921,25 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   let hoveredFaceHandle: THREE.Mesh | null = null;
 
+  // Single source of truth for the canvas cursor, driven by whichever of the
+  // two drag affordances (gimbal, resize grip) is currently hovered/active.
+  function updateCursor(): void {
+    if (resizeDrag || transformControls.dragging) {
+      renderer.domElement.style.cursor = "grabbing";
+    } else if (hoveredFaceHandle || transformControls.axis !== null) {
+      renderer.domElement.style.cursor = "grab";
+    } else {
+      renderer.domElement.style.cursor = "";
+    }
+  }
+
   function setHoveredFaceHandle(handle: THREE.Mesh | null): void {
-    if (hoveredFaceHandle === handle) return;
-    if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = 0;
-    hoveredFaceHandle = handle;
-    if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = FACE_HIGHLIGHT_OPACITY;
-    renderer.domElement.style.cursor = handle ? "pointer" : "";
+    if (hoveredFaceHandle !== handle) {
+      if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = 0;
+      hoveredFaceHandle = handle;
+      if (hoveredFaceHandle) (hoveredFaceHandle.material as THREE.MeshBasicMaterial).opacity = FACE_HIGHLIGHT_OPACITY;
+    }
+    updateCursor();
   }
 
   // Raycasts only the currently-selected object's face handles (never the
@@ -1066,6 +1082,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     const id = resizeDrag.id;
     orbitControls.enabled = true;
     resizeDrag = null;
+    updateCursor();
     // Fire while liveDimensions still holds the final live value — the
     // listener (main.ts) reads it via getDimensions to reconcile the store,
     // and that store update synchronously re-populates lastSeen to match
