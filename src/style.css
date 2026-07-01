@@ -50,13 +50,17 @@ h1 {
   border-bottom: 1px solid #2f333b;
 }
 
+.list-heading {
+  font-size: 0.95rem;
+  color: #aab0bb;
+  margin: 0 0 12px;
+}
+
 .csv-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #2f333b;
+  margin-bottom: 12px;
 }
 
 .csv-actions button {

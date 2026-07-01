@@ -89,6 +89,11 @@ export function createSidebar(
   );
   container.appendChild(form);
 
+  const listHeading = document.createElement("h2");
+  listHeading.className = "list-heading";
+  listHeading.textContent = "Objects";
+  container.appendChild(listHeading);
+
   const csvActions = document.createElement("div");
   csvActions.className = "csv-actions";
 
