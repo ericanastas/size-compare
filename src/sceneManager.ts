@@ -25,6 +25,7 @@ export interface SceneManager {
   syncObjects(objects: readonly SizeObject[]): void;
   select(id: string | null, additive?: boolean): void;
   onSelect(callback: (ids: string[]) => void): void;
+  onDragEnd(callback: () => void): void;
   setProjection(mode: ProjectionMode): void;
   setStandardView(view: StandardView): void;
   zoomExtents(): void;
@@ -167,6 +168,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const multiSelectProxy = new THREE.Object3D();
   scene.add(multiSelectProxy);
   let multiDragStart: { proxyPosition: THREE.Vector3; groupPositions: Map<string, THREE.Vector3> } | null = null;
+  const dragEndListeners: Array<() => void> = [];
 
   transformControls.addEventListener("dragging-changed", (event) => {
     orbitControls.enabled = !event.value;
@@ -180,6 +182,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       multiDragStart = { proxyPosition: multiSelectProxy.position.clone(), groupPositions };
     } else {
       multiDragStart = null;
+    }
+
+    // dragging-changed only fires when the value actually flips, so
+    // event.value === false reliably means a drag just finished (covers
+    // both single-object and multi-select rigid-group drags).
+    if (!event.value) {
+      for (const listener of dragEndListeners) listener();
     }
   });
 
@@ -738,6 +747,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     syncObjects,
     select,
     onSelect: (callback) => selectListeners.push(callback),
+    onDragEnd: (callback) => dragEndListeners.push(callback),
     setProjection,
     setStandardView,
     zoomExtents,
