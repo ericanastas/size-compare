@@ -26,6 +26,7 @@ export interface SceneManager {
   onSelect(callback: (id: string | null) => void): void;
   setProjection(mode: ProjectionMode): void;
   setStandardView(view: StandardView): void;
+  getPosition(id: string): { x: number; y: number; z: number } | null;
   resize(): void;
   render(): void;
 }
@@ -443,12 +444,19 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   updateToolbarUI();
 
+  function getPosition(id: string): { x: number; y: number; z: number } | null {
+    const group = groups.get(id);
+    if (!group) return null;
+    return { x: group.position.x, y: group.position.y, z: group.position.z };
+  }
+
   return {
     syncObjects,
     select,
     onSelect: (callback) => selectListeners.push(callback),
     setProjection,
     setStandardView,
+    getPosition,
     resize,
     render,
   };

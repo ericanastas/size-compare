@@ -67,6 +67,13 @@ export class ObjectStore {
     this.notify();
   }
 
+  loadFull(objects: readonly SizeObject[]): void {
+    this._objects = [...objects];
+    this.nextId = objects.reduce((max, o) => Math.max(max, Number(o.id) || 0), 0) + 1;
+    this.nextX = objects.reduce((max, o) => Math.max(max, o.position.x + o.width / 2 + GAP), 0);
+    this.notify();
+  }
+
   private buildObject(
     name: string,
     width: number,

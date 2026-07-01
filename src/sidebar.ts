@@ -30,6 +30,7 @@ export function createSidebar(
   container: HTMLElement,
   store: ObjectStore,
   onSelectRequest: (id: string | null) => void,
+  getShareUrl: () => string,
 ): Sidebar {
   container.innerHTML = "";
 
@@ -127,6 +128,29 @@ export function createSidebar(
       skipped > 0
         ? `Loaded ${rows.length} object${rows.length === 1 ? "" : "s"}, skipped ${skipped} invalid row${skipped === 1 ? "" : "s"}.`
         : `Loaded ${rows.length} object${rows.length === 1 ? "" : "s"}.`;
+  });
+
+  const shareActions = document.createElement("div");
+  shareActions.className = "share-actions";
+
+  const shareButton = document.createElement("button");
+  shareButton.type = "button";
+  shareButton.textContent = "Copy Share Link";
+
+  const shareStatus = document.createElement("p");
+  shareStatus.className = "share-status";
+
+  shareActions.append(shareButton, shareStatus);
+  container.appendChild(shareActions);
+
+  shareButton.addEventListener("click", async () => {
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      shareStatus.textContent = "Share link copied to clipboard.";
+    } catch {
+      shareStatus.textContent = url;
+    }
   });
 
   const list = document.createElement("div");

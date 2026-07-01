@@ -85,6 +85,38 @@ h1 {
   color: #8a909c;
 }
 
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2f333b;
+}
+
+.share-actions button {
+  flex: 1;
+  background: #2a2d34;
+  border: 1px solid #3a3f48;
+  border-radius: 4px;
+  color: #e6e8eb;
+  padding: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.share-actions button:hover {
+  background: #343842;
+}
+
+.share-status {
+  width: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8a909c;
+  word-break: break-all;
+}
+
 .field {
   display: flex;
   flex-direction: column;
