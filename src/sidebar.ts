@@ -1,6 +1,7 @@
 import type { ObjectStore } from "./state";
 import type { SizeObject } from "./types";
 import { objectsToCsv, parseShapesCsv } from "./csv";
+import { convertDisplayUnits } from "./formats";
 
 export interface Sidebar {
   setSelected(ids: readonly string[]): void;
@@ -288,7 +289,7 @@ export function createSidebar(
       nameEl.textContent = object.name;
       const dimsEl = document.createElement("div");
       dimsEl.className = "dims";
-      dimsEl.textContent = `${object.width} × ${object.depth} × ${object.height}`;
+      dimsEl.textContent = `${convertDisplayUnits(object.width)} × ${convertDisplayUnits(object.depth)} × ${convertDisplayUnits(object.height)}`;
       info.append(nameEl, dimsEl);
 
       const removeButton = document.createElement("button");

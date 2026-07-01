@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import type { SizeObject } from "./types";
+import { convertDisplayUnits } from "./formats";
 
 const BOX_OPACITY = 0.35;
 const SELECTION_OUTLINE_COLOR = 0x4a7dfc;
@@ -647,13 +648,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     const halfHeight = object.height / 2;
     const halfDepth = object.depth / 2;
 
-    widthLabel.element.textContent = String(object.width);
+    widthLabel.element.textContent = convertDisplayUnits(object.width);
     widthLabel.position.set(0, halfHeight, halfDepth);
 
-    heightLabel.element.textContent = String(object.height);
+    heightLabel.element.textContent = convertDisplayUnits(object.height);
     heightLabel.position.set(-halfWidth, 0, halfDepth);
 
-    depthLabel.element.textContent = String(object.depth);
+    depthLabel.element.textContent = convertDisplayUnits(object.depth);
     depthLabel.position.set(-halfWidth, halfHeight, 0);
   }
 
