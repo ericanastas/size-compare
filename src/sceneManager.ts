@@ -17,20 +17,57 @@ function hasDimensionsChanged(previous: SizeObject | undefined, current: SizeObj
   );
 }
 
+export type ProjectionMode = "perspective" | "orthographic";
+export type StandardView = "front" | "back" | "top" | "bottom" | "left" | "right";
+
 export interface SceneManager {
   syncObjects(objects: readonly SizeObject[]): void;
   select(id: string | null): void;
   onSelect(callback: (id: string | null) => void): void;
+  setProjection(mode: ProjectionMode): void;
+  setStandardView(view: StandardView): void;
   resize(): void;
   render(): void;
+}
+
+const STANDARD_VIEW_DIRECTIONS: Record<StandardView, THREE.Vector3> = {
+  front: new THREE.Vector3(0, 0, 1),
+  back: new THREE.Vector3(0, 0, -1),
+  top: new THREE.Vector3(0, 1, 0),
+  bottom: new THREE.Vector3(0, -1, 0),
+  left: new THREE.Vector3(-1, 0, 0),
+  right: new THREE.Vector3(1, 0, 0),
+};
+
+const STANDARD_VIEW_UP: Record<StandardView, THREE.Vector3> = {
+  front: new THREE.Vector3(0, 1, 0),
+  back: new THREE.Vector3(0, 1, 0),
+  top: new THREE.Vector3(0, 0, -1),
+  bottom: new THREE.Vector3(0, 0, 1),
+  left: new THREE.Vector3(0, 1, 0),
+  right: new THREE.Vector3(0, 1, 0),
+};
+
+function copyCameraPose(from: THREE.Camera, to: THREE.Camera): void {
+  to.position.copy(from.position);
+  to.quaternion.copy(from.quaternion);
+  to.up.copy(from.up);
 }
 
 export function createSceneManager(container: HTMLElement): SceneManager {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1d22);
 
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
-  camera.position.set(18, 14, 22);
+  const perspectiveCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+  perspectiveCamera.position.set(18, 14, 22);
+
+  const orthographicCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+  orthographicCamera.position.set(18, 14, 22);
+
+  let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = perspectiveCamera;
+  let projectionMode: ProjectionMode = "perspective";
+  let frameRadius = 10;
+  const frameCenter = new THREE.Vector3(0, 2, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -209,15 +246,73 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 1);
-    const distance = radius / Math.sin((camera.fov * Math.PI) / 360) + radius;
-
     const direction = new THREE.Vector3(0.6, 0.45, 0.9).normalize();
-    camera.position.copy(center).addScaledVector(direction, distance);
-    camera.near = Math.max(distance / 100, 0.1);
-    camera.far = distance * 20;
-    camera.updateProjectionMatrix();
+
+    const perspectiveDistance = radius / Math.sin((perspectiveCamera.fov * Math.PI) / 360) + radius;
+    perspectiveCamera.position.copy(center).addScaledVector(direction, perspectiveDistance);
+    perspectiveCamera.near = Math.max(perspectiveDistance / 100, 0.1);
+    perspectiveCamera.far = perspectiveDistance * 20;
+    perspectiveCamera.updateProjectionMatrix();
+
+    const orthographicDistance = radius * 4 + 10;
+    orthographicCamera.position.copy(center).addScaledVector(direction, orthographicDistance);
+    orthographicCamera.up.set(0, 1, 0);
+    orthographicCamera.lookAt(center);
+    orthographicCamera.near = Math.max(orthographicDistance / 100, 0.1);
+    orthographicCamera.far = orthographicDistance * 20;
+
+    frameCenter.copy(center);
+    frameRadius = radius * 1.1;
+    updateOrthographicFrustum();
 
     orbitControls.target.copy(center);
+    orbitControls.update();
+  }
+
+  function updateOrthographicFrustum(): void {
+    const aspect = container.clientWidth / container.clientHeight || 1;
+    orthographicCamera.left = -frameRadius * aspect;
+    orthographicCamera.right = frameRadius * aspect;
+    orthographicCamera.top = frameRadius;
+    orthographicCamera.bottom = -frameRadius;
+    orthographicCamera.updateProjectionMatrix();
+  }
+
+  function setProjection(mode: ProjectionMode): void {
+    if (mode === projectionMode) return;
+    projectionMode = mode;
+
+    if (mode === "orthographic") {
+      copyCameraPose(perspectiveCamera, orthographicCamera);
+      const distance = perspectiveCamera.position.distanceTo(orbitControls.target);
+      const halfHeight = distance * Math.tan((THREE.MathUtils.DEG2RAD * perspectiveCamera.fov) / 2);
+      frameRadius = Math.max(halfHeight, 0.1);
+      updateOrthographicFrustum();
+      camera = orthographicCamera;
+    } else {
+      copyCameraPose(orthographicCamera, perspectiveCamera);
+      camera = perspectiveCamera;
+    }
+
+    orbitControls.object = camera;
+    transformControls.camera = camera;
+    resize();
+    orbitControls.update();
+    updateToolbarUI();
+  }
+
+  function setStandardView(view: StandardView): void {
+    if (projectionMode !== "orthographic") return;
+
+    const distance = Math.max(frameRadius, 1) * 4 + 10;
+    orthographicCamera.position.copy(frameCenter).addScaledVector(STANDARD_VIEW_DIRECTIONS[view], distance);
+    orthographicCamera.up.copy(STANDARD_VIEW_UP[view]);
+    orthographicCamera.lookAt(frameCenter);
+    orthographicCamera.near = Math.max(distance / 100, 0.1);
+    orthographicCamera.far = distance * 20;
+    orthographicCamera.updateProjectionMatrix();
+
+    orbitControls.target.copy(frameCenter);
     orbitControls.update();
   }
 
@@ -246,8 +341,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   function resize(): void {
     const width = container.clientWidth;
     const height = container.clientHeight;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
+
+    perspectiveCamera.aspect = width / height;
+    perspectiveCamera.updateProjectionMatrix();
+    updateOrthographicFrustum();
+
     renderer.setSize(width, height);
     labelRenderer.setSize(width, height);
   }
@@ -258,10 +356,63 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     labelRenderer.render(scene, camera);
   }
 
+  const toolbar = document.createElement("div");
+  toolbar.className = "viewport-toolbar";
+
+  const projectionGroup = document.createElement("div");
+  projectionGroup.className = "toolbar-group";
+
+  const perspectiveBtn = document.createElement("button");
+  perspectiveBtn.type = "button";
+  perspectiveBtn.textContent = "Perspective";
+  perspectiveBtn.addEventListener("click", () => setProjection("perspective"));
+
+  const orthographicBtn = document.createElement("button");
+  orthographicBtn.type = "button";
+  orthographicBtn.textContent = "Orthographic";
+  orthographicBtn.addEventListener("click", () => setProjection("orthographic"));
+
+  projectionGroup.append(perspectiveBtn, orthographicBtn);
+
+  const viewGroup = document.createElement("div");
+  viewGroup.className = "toolbar-group view-group";
+
+  const VIEW_LABELS: Record<StandardView, string> = {
+    front: "Front",
+    back: "Back",
+    top: "Top",
+    bottom: "Bottom",
+    left: "Left",
+    right: "Right",
+  };
+
+  const viewButtons = (Object.keys(VIEW_LABELS) as StandardView[]).map((view) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = VIEW_LABELS[view];
+    btn.addEventListener("click", () => setStandardView(view));
+    viewGroup.appendChild(btn);
+    return btn;
+  });
+
+  toolbar.append(projectionGroup, viewGroup);
+  container.appendChild(toolbar);
+
+  function updateToolbarUI(): void {
+    perspectiveBtn.classList.toggle("active", projectionMode === "perspective");
+    orthographicBtn.classList.toggle("active", projectionMode === "orthographic");
+    viewGroup.classList.toggle("visible", projectionMode === "orthographic");
+    for (const btn of viewButtons) btn.disabled = projectionMode !== "orthographic";
+  }
+
+  updateToolbarUI();
+
   return {
     syncObjects,
     select,
     onSelect: (callback) => selectListeners.push(callback),
+    setProjection,
+    setStandardView,
     resize,
     render,
   };
