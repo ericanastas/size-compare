@@ -142,14 +142,51 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     label.position.set(0, 0, 0);
     group.add(label);
 
+    const widthLabel = createDimensionLabel("width");
+    const heightLabel = createDimensionLabel("height");
+    const depthLabel = createDimensionLabel("depth");
+    group.add(widthLabel, heightLabel, depthLabel);
+
+    updateDimensionLabels(widthLabel, heightLabel, depthLabel, object);
+
     return group;
+  }
+
+  function createDimensionLabel(kind: "width" | "height" | "depth"): CSS2DObject {
+    const el = document.createElement("div");
+    el.className = `dimension-label dimension-label--${kind}`;
+    return new CSS2DObject(el);
+  }
+
+  function updateDimensionLabels(
+    widthLabel: CSS2DObject,
+    heightLabel: CSS2DObject,
+    depthLabel: CSS2DObject,
+    object: SizeObject,
+  ): void {
+    const halfWidth = object.width / 2;
+    const halfHeight = object.height / 2;
+    const halfDepth = object.depth / 2;
+
+    widthLabel.element.textContent = String(object.width);
+    widthLabel.position.set(0, halfHeight, halfDepth);
+
+    heightLabel.element.textContent = String(object.height);
+    heightLabel.position.set(-halfWidth, 0, halfDepth);
+
+    depthLabel.element.textContent = String(object.depth);
+    depthLabel.position.set(-halfWidth, halfHeight, 0);
   }
 
   function updateGroup(group: THREE.Group, object: SizeObject): void {
     const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
     const edges = group.children.find((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
-    const label = group.children.find((c): c is CSS2DObject => c instanceof CSS2DObject);
-    if (!mesh || !edges || !label) return;
+    const labels = group.children.filter((c): c is CSS2DObject => c instanceof CSS2DObject);
+    const label = labels.find((l) => l.element.classList.contains("object-label"));
+    const widthLabel = labels.find((l) => l.element.classList.contains("dimension-label--width"));
+    const heightLabel = labels.find((l) => l.element.classList.contains("dimension-label--height"));
+    const depthLabel = labels.find((l) => l.element.classList.contains("dimension-label--depth"));
+    if (!mesh || !edges || !label || !widthLabel || !heightLabel || !depthLabel) return;
 
     mesh.geometry.dispose();
     mesh.geometry = new THREE.BoxGeometry(object.width, object.height, object.depth);
@@ -161,6 +198,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
     label.element.textContent = object.name;
     label.position.set(0, 0, 0);
+
+    updateDimensionLabels(widthLabel, heightLabel, depthLabel, object);
   }
 
   function disposeGroup(group: THREE.Group): void {

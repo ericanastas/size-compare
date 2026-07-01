@@ -260,3 +260,14 @@ h1 {
   white-space: nowrap;
   transform: translate(-50%, -50%);
 }
+
+.dimension-label {
+  color: #c9ccd1;
+  font-size: 10px;
+  font-family: system-ui, sans-serif;
+  background: rgba(20, 22, 26, 0.6);
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
