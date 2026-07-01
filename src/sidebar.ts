@@ -7,6 +7,7 @@ export interface Sidebar {
 }
 
 const VARIES_HINT = "<Varies>";
+const DEFAULT_DIMENSION = "10";
 
 function setFieldValue(input: HTMLInputElement, values: readonly string[]): void {
   const allSame = values.every((v) => v === values[0]);
@@ -57,9 +58,9 @@ export function createSidebar(
   form.noValidate = true;
 
   const nameField = field("Name", "text", "");
-  const widthField = field("Width", "number", "1");
-  const heightField = field("Height", "number", "1");
-  const depthField = field("Depth", "number", "1");
+  const widthField = field("Width", "number", DEFAULT_DIMENSION);
+  const heightField = field("Height", "number", DEFAULT_DIMENSION);
+  const depthField = field("Depth", "number", DEFAULT_DIMENSION);
 
   const error = document.createElement("p");
   error.className = "form-error";
@@ -231,9 +232,9 @@ export function createSidebar(
     error.textContent = "";
     store.add(name, width, height, depth);
     form.reset();
-    widthField.input.value = "1";
-    heightField.input.value = "1";
-    depthField.input.value = "1";
+    widthField.input.value = DEFAULT_DIMENSION;
+    heightField.input.value = DEFAULT_DIMENSION;
+    depthField.input.value = DEFAULT_DIMENSION;
     nameField.input.focus();
   });
 
@@ -253,11 +254,11 @@ export function createSidebar(
     } else {
       nameField.input.value = "";
       nameField.input.placeholder = "";
-      widthField.input.value = "1";
+      widthField.input.value = DEFAULT_DIMENSION;
       widthField.input.placeholder = "";
-      heightField.input.value = "1";
+      heightField.input.value = DEFAULT_DIMENSION;
       heightField.input.placeholder = "";
-      depthField.input.value = "1";
+      depthField.input.value = DEFAULT_DIMENSION;
       depthField.input.placeholder = "";
       submitButton.textContent = "Add object";
       cancelButton.hidden = true;
