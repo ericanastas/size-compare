@@ -60,9 +60,9 @@ export function createSidebar(
   form.noValidate = true;
 
   const nameField = field("Name", "text", "");
-  const widthField = field("Width", "number", DEFAULT_DIMENSION);
-  const heightField = field("Height", "number", DEFAULT_DIMENSION);
-  const depthField = field("Depth", "number", DEFAULT_DIMENSION);
+  const widthField = field("Width (m)", "number", DEFAULT_DIMENSION);
+  const heightField = field("Height (m)", "number", DEFAULT_DIMENSION);
+  const depthField = field("Depth (m)", "number", DEFAULT_DIMENSION);
 
   const error = document.createElement("p");
   error.className = "form-error";
