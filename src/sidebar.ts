@@ -144,9 +144,7 @@ export function createSidebar(
 
     store.load(rows);
     csvStatus.textContent =
-      skipped > 0
-        ? `Loaded ${rows.length} object${rows.length === 1 ? "" : "s"}, skipped ${skipped} invalid row${skipped === 1 ? "" : "s"}.`
-        : `Loaded ${rows.length} object${rows.length === 1 ? "" : "s"}.`;
+      skipped > 0 ? `Skipped ${skipped} invalid row${skipped === 1 ? "" : "s"}.` : "";
   });
 
   const list = document.createElement("div");
