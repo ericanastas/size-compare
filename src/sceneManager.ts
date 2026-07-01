@@ -620,6 +620,12 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orthographicCamera.near = Math.max(orthographicDistance / 100, 0.1);
     orthographicCamera.far = orthographicDistance * 20;
 
+    // OrbitControls implements mouse-wheel zoom on an orthographic camera by
+    // scaling .zoom (not by changing the frustum bounds below), so any
+    // leftover zoom from manual scrolling has to be cleared here — otherwise
+    // it silently distorts the frustum we're about to compute from scratch.
+    orthographicCamera.zoom = 1;
+
     frameCenter.copy(center);
     frameRadius = radius * 1.1;
     updateOrthographicFrustum();
@@ -646,6 +652,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       const distance = perspectiveCamera.position.distanceTo(orbitControls.target);
       const halfHeight = distance * Math.tan((THREE.MathUtils.DEG2RAD * perspectiveCamera.fov) / 2);
       frameRadius = Math.max(halfHeight, 0.1);
+      orthographicCamera.zoom = 1;
       updateOrthographicFrustum();
       camera = orthographicCamera;
     } else {
@@ -668,6 +675,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orthographicCamera.lookAt(frameCenter);
     orthographicCamera.near = Math.max(distance / 100, 0.1);
     orthographicCamera.far = distance * 20;
+    orthographicCamera.zoom = 1;
     orthographicCamera.updateProjectionMatrix();
 
     orbitControls.target.copy(frameCenter);
