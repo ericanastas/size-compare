@@ -85,10 +85,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   directional.position.set(12, 20, 10);
   scene.add(directional);
 
-  // Target cell count — cell size is snapped to a power of ten (1, 10, 100,
+  // Target cell count — cell size is snapped to a power of two (1, 2, 4, 8,
   // ...), so the actual division count can't hit this exactly, but whichever
-  // power of ten lands closest to it wins.
-  const TARGET_GRID_DIVISIONS = 20;
+  // power of two lands closest to it wins.
+  const TARGET_GRID_DIVISIONS = 50;
   const GRID_PADDING = 4;
   const MIN_HALF_REACH = 10;
 
@@ -96,15 +96,18 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     return new THREE.GridHelper(size, divisions, 0x444444, 0x2a2d33);
   }
 
-  // Picks a power-of-ten cell size and however many of them are needed to
-  // cover `minCoverage`, choosing whichever power of ten leaves the
-  // resulting division count closest to TARGET_GRID_DIVISIONS.
+  // Picks a power-of-two cell size and however many of them are needed to
+  // cover `minCoverage`, choosing whichever power of two leaves the
+  // resulting division count closest to TARGET_GRID_DIVISIONS. Divisions are
+  // kept even so a grid line always lands exactly on the origin, rather than
+  // straddling it in the middle of a cell.
   function pickGrid(minCoverage: number): { size: number; divisions: number } {
-    let best = { size: minCoverage, divisions: 1 };
+    let best = { size: minCoverage, divisions: 2 };
     let bestDiff = Infinity;
-    for (let k = 0; k <= 6; k++) {
-      const cellSize = 10 ** k;
-      const divisions = Math.max(1, Math.ceil(minCoverage / cellSize));
+    for (let k = 0; k <= 20; k++) {
+      const cellSize = 2 ** k;
+      let divisions = Math.max(2, Math.ceil(minCoverage / cellSize));
+      if (divisions % 2 !== 0) divisions += 1;
       const diff = Math.abs(divisions - TARGET_GRID_DIVISIONS);
       if (diff < bestDiff) {
         bestDiff = diff;
