@@ -12,12 +12,13 @@ if (!sidebarEl || !viewportEl) {
 const store = new ObjectStore();
 const sceneManager = createSceneManager(viewportEl);
 
-// Reflects live drag positions (from the scene), not just the store's last
-// known ones — used so Save CSV and the share link both capture what's
-// actually on screen right now.
+// Reflects live drag/resize state (from the scene), not just the store's
+// last known values — used so Save CSV and the share link both capture
+// what's actually on screen right now.
 const getLiveObjects = () =>
   store.objects.map((o) => ({
     ...o,
+    ...(sceneManager.getDimensions(o.id) ?? {}),
     position: sceneManager.getPosition(o.id) ?? o.position,
   }));
 
@@ -53,10 +54,10 @@ function syncUrl(): void {
 
 store.subscribe(syncUrl);
 
-// Reconcile the store with the scene once a drag finishes — this also
-// triggers syncUrl via the store.subscribe above, so no separate call is
-// needed here.
-sceneManager.onDragEnd(() => store.syncPositions(getLiveObjects()));
+// Reconcile the store with the scene once a translate- or resize-drag
+// finishes — this also triggers syncUrl via the store.subscribe above, so no
+// separate call is needed here.
+sceneManager.onDragEnd(() => store.syncGeometry(getLiveObjects()));
 
 sceneManager.resize();
 window.addEventListener("resize", () => sceneManager.resize());

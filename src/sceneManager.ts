@@ -6,6 +6,96 @@ import type { SizeObject } from "./types";
 
 const BOX_OPACITY = 0.35;
 const SELECTION_OUTLINE_COLOR = 0x4a7dfc;
+const GRIP_COLOR = 0xffa726;
+const GRIP_RADIUS_FACTOR = 0.08;
+const MIN_DIMENSION = 0.01;
+
+// Shared unit-sphere geometry for every grip on every object — grips are
+// sized via mesh.scale (world radius = scale, since this geometry has
+// radius 1), never by regenerating geometry, so there's nothing per-object
+// to dispose beyond each grip's own material.
+const GRIP_GEOMETRY = new THREE.SphereGeometry(1, 12, 8);
+
+type FaceAxis = { axis: "x" | "y" | "z"; sign: 1 | -1 };
+
+const FACES: readonly FaceAxis[] = [
+  { axis: "x", sign: 1 },
+  { axis: "x", sign: -1 },
+  { axis: "y", sign: 1 },
+  { axis: "y", sign: -1 },
+  { axis: "z", sign: 1 },
+  { axis: "z", sign: -1 },
+];
+
+function gripLocalPosition(
+  object: { width: number; height: number; depth: number },
+  face: FaceAxis,
+): THREE.Vector3 {
+  const half: Record<"x" | "y" | "z", number> = {
+    x: object.width / 2,
+    y: object.height / 2,
+    z: object.depth / 2,
+  };
+  const position = new THREE.Vector3();
+  position[face.axis] = half[face.axis] * face.sign;
+  return position;
+}
+
+function gripRadius(object: { width: number; height: number; depth: number }): number {
+  return Math.min(object.width, object.height, object.depth) * GRIP_RADIUS_FACTOR;
+}
+
+interface GroupParts {
+  mesh: THREE.Mesh;
+  edges: THREE.LineSegments;
+  selectionOutline: THREE.LineSegments;
+  nameLabel: CSS2DObject;
+  widthLabel: CSS2DObject;
+  heightLabel: CSS2DObject;
+  depthLabel: CSS2DObject;
+}
+
+function findGroupParts(group: THREE.Group): GroupParts | null {
+  const mesh = group.children.find(
+    (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.userData.role === "box",
+  );
+  const lineSegments = group.children.filter((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
+  const edges = lineSegments.find((l) => l.userData.role === "edges");
+  const selectionOutline = lineSegments.find((l) => l.userData.role === "selectionOutline");
+  const labels = group.children.filter((c): c is CSS2DObject => c instanceof CSS2DObject);
+  const nameLabel = labels.find((l) => l.userData.role === "nameLabel");
+  const widthLabel = labels.find((l) => l.element.classList.contains("dimension-label--width"));
+  const heightLabel = labels.find((l) => l.element.classList.contains("dimension-label--height"));
+  const depthLabel = labels.find((l) => l.element.classList.contains("dimension-label--depth"));
+  if (!mesh || !edges || !selectionOutline || !nameLabel || !widthLabel || !heightLabel || !depthLabel) return null;
+  return { mesh, edges, selectionOutline, nameLabel, widthLabel, heightLabel, depthLabel };
+}
+
+// Recreates box/edge geometry from scratch — shared by the store-driven
+// update path (updateGroup) and the live resize-drag path, which calls this
+// on every pointermove with a scratch object rather than a real SizeObject.
+function rebuildGeometry(
+  object: { width: number; height: number; depth: number; color: number },
+  parts: Pick<GroupParts, "mesh" | "edges" | "selectionOutline">,
+): void {
+  parts.mesh.geometry.dispose();
+  parts.mesh.geometry = new THREE.BoxGeometry(object.width, object.height, object.depth);
+  (parts.mesh.material as THREE.MeshStandardMaterial).color.setHex(object.color);
+
+  parts.edges.geometry.dispose();
+  const edgesGeometry = new THREE.EdgesGeometry(parts.mesh.geometry);
+  parts.edges.geometry = edgesGeometry;
+  parts.selectionOutline.geometry = edgesGeometry;
+  (parts.edges.material as THREE.LineBasicMaterial).color.setHex(object.color);
+}
+
+function repositionGrips(grips: readonly THREE.Mesh[], object: { width: number; height: number; depth: number }): void {
+  const radius = gripRadius(object);
+  for (let i = 0; i < FACES.length; i++) {
+    grips[i].position.copy(gripLocalPosition(object, FACES[i]));
+    grips[i].scale.setScalar(radius);
+  }
+}
 
 function hasObjectChanged(previous: SizeObject | undefined, current: SizeObject): boolean {
   if (!previous) return false;
@@ -34,6 +124,7 @@ export interface SceneManager {
   setStandardView(view: StandardView): void;
   zoomExtents(): void;
   getPosition(id: string): { x: number; y: number; z: number } | null;
+  getDimensions(id: string): { width: number; height: number; depth: number } | null;
   resize(): void;
   render(): void;
 }
@@ -299,6 +390,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const groups = new Map<string, THREE.Group>();
   const lastSeen = new Map<string, SizeObject>();
   const meshToId = new Map<THREE.Mesh, string>();
+  const gripToFace = new Map<THREE.Mesh, FaceAxis>();
+  const gripToId = new Map<THREE.Mesh, string>();
+  // Live width/height/depth during a resize-drag, read by computeBoundsBox
+  // and getDimensions in preference to lastSeen (which — like groups does
+  // for position during any drag — is never updated mid-drag, only by
+  // syncObjects). Cleared once the drag-end store reconciliation completes.
+  const liveDimensions = new Map<string, { width: number; height: number; depth: number }>();
   const selectListeners: Array<(ids: string[]) => void> = [];
   const selectedIds = new Set<string>();
   let attachedId: string | null = null;
@@ -324,7 +422,9 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   function applyDisplayStyle(): void {
     for (const group of groups.values()) {
-      const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
+      const mesh = group.children.find(
+        (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.userData.role === "box",
+      );
       if (mesh) applyDisplayStyleToMesh(mesh);
     }
   }
@@ -344,6 +444,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.role = "box";
     applyDisplayStyleToMesh(mesh);
     group.add(mesh);
     meshToId.set(mesh, object.id);
@@ -360,6 +461,23 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     selectionOutline.userData.role = "selectionOutline";
     selectionOutline.visible = false;
     group.add(selectionOutline);
+
+    // Resize grips — one per face, only shown for a single-object selection
+    // (toggled in applySelectionState). depthTest:false keeps them clickable
+    // regardless of display style or occlusion, same reasoning as
+    // selectionOutline above.
+    const grips = FACES.map((face) => {
+      const grip = new THREE.Mesh(GRIP_GEOMETRY, new THREE.MeshBasicMaterial({ color: GRIP_COLOR, depthTest: false }));
+      grip.userData.role = "grip";
+      grip.visible = false;
+      grip.position.copy(gripLocalPosition(object, face));
+      grip.scale.setScalar(gripRadius(object));
+      group.add(grip);
+      gripToFace.set(grip, face);
+      gripToId.set(grip, object.id);
+      return grip;
+    });
+    group.userData.grips = grips;
 
     const labelEl = document.createElement("div");
     labelEl.className = "object-label";
@@ -413,31 +531,16 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   function updateGroup(group: THREE.Group, object: SizeObject): void {
     group.position.set(object.position.x, object.position.y, object.position.z);
 
-    const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
-    const lineSegments = group.children.filter((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
-    const edges = lineSegments.find((l) => l.userData.role === "edges");
-    const selectionOutline = lineSegments.find((l) => l.userData.role === "selectionOutline");
-    const labels = group.children.filter((c): c is CSS2DObject => c instanceof CSS2DObject);
-    const label = labels.find((l) => l.element.classList.contains("object-label"));
-    const widthLabel = labels.find((l) => l.element.classList.contains("dimension-label--width"));
-    const heightLabel = labels.find((l) => l.element.classList.contains("dimension-label--height"));
-    const depthLabel = labels.find((l) => l.element.classList.contains("dimension-label--depth"));
-    if (!mesh || !edges || !selectionOutline || !label || !widthLabel || !heightLabel || !depthLabel) return;
+    const parts = findGroupParts(group);
+    if (!parts) return;
 
-    mesh.geometry.dispose();
-    mesh.geometry = new THREE.BoxGeometry(object.width, object.height, object.depth);
-    (mesh.material as THREE.MeshStandardMaterial).color.setHex(object.color);
+    rebuildGeometry(object, parts);
+    repositionGrips((group.userData.grips as THREE.Mesh[] | undefined) ?? [], object);
 
-    edges.geometry.dispose();
-    const edgesGeometry = new THREE.EdgesGeometry(mesh.geometry);
-    edges.geometry = edgesGeometry;
-    selectionOutline.geometry = edgesGeometry;
-    (edges.material as THREE.LineBasicMaterial).color.setHex(object.color);
+    parts.nameLabel.element.textContent = object.name;
+    parts.nameLabel.position.set(0, 0, 0);
 
-    label.element.textContent = object.name;
-    label.position.set(0, 0, 0);
-
-    updateDimensionLabels(widthLabel, heightLabel, depthLabel, object);
+    updateDimensionLabels(parts.widthLabel, parts.heightLabel, parts.depthLabel, object);
   }
 
   function applyLabelVisibility(): void {
@@ -463,9 +566,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   function disposeGroup(group: THREE.Group): void {
     group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
+        // Grips share GRIP_GEOMETRY across every object — disposing it here
+        // would break every other still-alive object's grips.
+        if (child.userData.role !== "grip") child.geometry.dispose();
         (child.material as THREE.Material).dispose();
         meshToId.delete(child);
+        gripToFace.delete(child);
+        gripToId.delete(child);
       } else if (child instanceof THREE.LineSegments) {
         child.geometry.dispose();
         (child.material as THREE.Material).dispose();
@@ -481,6 +588,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
         (c): c is THREE.LineSegments => c instanceof THREE.LineSegments && c.userData.role === "selectionOutline",
       );
       if (outline) outline.visible = selectedIds.has(id);
+
+      // Resize grips only ever show for a single-object selection.
+      const grips = (group.userData.grips as THREE.Mesh[] | undefined) ?? [];
+      const showGrips = selectedIds.size === 1 && selectedIds.has(id);
+      for (const grip of grips) grip.visible = showGrips;
     }
 
     if (selectedIds.size === 1) {
@@ -580,11 +692,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   function computeBoundsBox(): THREE.Box3 {
     const box = new THREE.Box3();
     for (const [id, group] of groups) {
-      const object = lastSeen.get(id);
-      if (!object) continue;
-      const halfWidth = object.width / 2;
-      const halfHeight = object.height / 2;
-      const halfDepth = object.depth / 2;
+      const dims = liveDimensions.get(id) ?? lastSeen.get(id);
+      if (!dims) continue;
+      const halfWidth = dims.width / 2;
+      const halfHeight = dims.height / 2;
+      const halfDepth = dims.depth / 2;
       box.expandByPoint(
         new THREE.Vector3(
           group.position.x - halfWidth,
@@ -735,6 +847,153 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
+  function setPointerFromEvent(event: PointerEvent): void {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+  }
+
+  interface ResizeDragState {
+    id: string;
+    face: FaceAxis;
+    plane: THREE.Plane;
+    pointStart: THREE.Vector3;
+    startWidth: number;
+    startHeight: number;
+    startDepth: number;
+    startPosition: THREE.Vector3;
+    parts: GroupParts;
+    grips: THREE.Mesh[];
+  }
+  let resizeDrag: ResizeDragState | null = null;
+
+  // Raycasts only the currently-selected object's grips (never the whole
+  // scene's grips — only one group's are ever visible at a time anyway).
+  function hitTestGrip(event: PointerEvent): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
+    if (selectedIds.size !== 1) return null;
+    const [id] = selectedIds;
+    const group = groups.get(id);
+    if (!group) return null;
+    const grips = (group.userData.grips as THREE.Mesh[] | undefined) ?? [];
+
+    setPointerFromEvent(event);
+    const hits = raycaster.intersectObjects(grips, false);
+    if (hits.length === 0) return null;
+    const grip = hits[0].object as THREE.Mesh;
+    const face = gripToFace.get(grip);
+    return face ? { id, face, grip } : null;
+  }
+
+  // Builds the same axis-constrained drag plane TransformControlsPlane uses
+  // internally for single-axis translate (verified against
+  // TransformControls.js): a plane containing the drag axis, tilted to face
+  // the camera as much as possible. Returns false (and starts nothing) if
+  // the camera is looking straight down the axis — the plane degenerates
+  // there, same inherent weakness the move gizmo's own axis arrows have from
+  // directly overhead.
+  function startResizeDrag(hit: { id: string; face: FaceAxis; grip: THREE.Mesh }): boolean {
+    const group = groups.get(hit.id);
+    const object = lastSeen.get(hit.id);
+    const parts = group ? findGroupParts(group) : null;
+    if (!group || !object || !parts) return false;
+
+    const gripWorldPosition = new THREE.Vector3();
+    hit.grip.getWorldPosition(gripWorldPosition);
+
+    const axisUnit = new THREE.Vector3(
+      hit.face.axis === "x" ? 1 : 0,
+      hit.face.axis === "y" ? 1 : 0,
+      hit.face.axis === "z" ? 1 : 0,
+    );
+    const eye = camera.position.clone().sub(gripWorldPosition).normalize();
+    const planeNormal = axisUnit.clone().cross(eye.clone().cross(axisUnit));
+    if (planeNormal.lengthSq() < 1e-9) return false;
+    planeNormal.normalize();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, gripWorldPosition);
+
+    const pointStart = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, pointStart)) return false;
+
+    resizeDrag = {
+      id: hit.id,
+      face: hit.face,
+      plane,
+      pointStart,
+      startWidth: object.width,
+      startHeight: object.height,
+      startDepth: object.depth,
+      startPosition: group.position.clone(),
+      parts,
+      grips: (group.userData.grips as THREE.Mesh[] | undefined) ?? [],
+    };
+    orbitControls.enabled = false;
+    return true;
+  }
+
+  window.addEventListener("pointermove", (event) => {
+    if (!resizeDrag) return;
+    setPointerFromEvent(event);
+
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(resizeDrag.plane, hit)) return;
+    const offset = hit.sub(resizeDrag.pointStart);
+    const rawDelta = offset[resizeDrag.face.axis];
+    let delta = rawDelta * resizeDrag.face.sign;
+
+    const startDimension =
+      resizeDrag.face.axis === "x"
+        ? resizeDrag.startWidth
+        : resizeDrag.face.axis === "y"
+          ? resizeDrag.startHeight
+          : resizeDrag.startDepth;
+
+    // Clamp delta itself, not the derived outputs separately — otherwise the
+    // anchored opposite face would drift the instant a clamp saturates.
+    const minDelta = MIN_DIMENSION - startDimension;
+    if (delta < minDelta) delta = minDelta;
+    if (resizeDrag.face.axis === "y" && resizeDrag.face.sign === -1) {
+      const maxDeltaForGround = 2 * (resizeDrag.startPosition.y - resizeDrag.startHeight / 2);
+      if (delta > maxDeltaForGround) delta = maxDeltaForGround;
+    }
+
+    const newDimension = startDimension + delta;
+    const positionDelta = resizeDrag.face.sign === 1 ? delta / 2 : -delta / 2;
+
+    const newWidth = resizeDrag.face.axis === "x" ? newDimension : resizeDrag.startWidth;
+    const newHeight = resizeDrag.face.axis === "y" ? newDimension : resizeDrag.startHeight;
+    const newDepth = resizeDrag.face.axis === "z" ? newDimension : resizeDrag.startDepth;
+
+    const newPosition = resizeDrag.startPosition.clone();
+    newPosition[resizeDrag.face.axis] += positionDelta;
+
+    const group = groups.get(resizeDrag.id);
+    const lastObject = lastSeen.get(resizeDrag.id);
+    if (!group || !lastObject) return;
+
+    group.position.copy(newPosition);
+    const scratch: SizeObject = { ...lastObject, width: newWidth, height: newHeight, depth: newDepth, position: newPosition };
+    rebuildGeometry(scratch, resizeDrag.parts);
+    repositionGrips(resizeDrag.grips, scratch);
+    updateDimensionLabels(resizeDrag.parts.widthLabel, resizeDrag.parts.heightLabel, resizeDrag.parts.depthLabel, scratch);
+
+    liveDimensions.set(resizeDrag.id, { width: newWidth, height: newHeight, depth: newDepth });
+    updateGrid();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!resizeDrag) return;
+    const id = resizeDrag.id;
+    orbitControls.enabled = true;
+    resizeDrag = null;
+    // Fire while liveDimensions still holds the final live value — the
+    // listener (main.ts) reads it via getDimensions to reconcile the store,
+    // and that store update synchronously re-populates lastSeen to match
+    // before we clear liveDimensions below.
+    for (const listener of dragEndListeners) listener();
+    liveDimensions.delete(id);
+  });
+
   // A click and the start of an orbit/pan drag both begin with the same
   // pointerdown — only the pointerup position tells them apart. Selecting on
   // pointerdown made every orbit drag clear or change the selection before
@@ -743,7 +1002,18 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let pointerDownGesture: { x: number; y: number; skip: boolean } | null = null;
 
   renderer.domElement.addEventListener("pointerdown", (event) => {
-    pointerDownGesture = { x: event.clientX, y: event.clientY, skip: transformControls.dragging };
+    if (transformControls.dragging) {
+      pointerDownGesture = { x: event.clientX, y: event.clientY, skip: true };
+      return;
+    }
+
+    const grip = hitTestGrip(event);
+    if (grip && startResizeDrag(grip)) {
+      pointerDownGesture = { x: event.clientX, y: event.clientY, skip: true };
+      return;
+    }
+
+    pointerDownGesture = { x: event.clientX, y: event.clientY, skip: false };
   });
 
   window.addEventListener("pointerup", (event) => {
@@ -752,11 +1022,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     if (!gesture || gesture.skip) return;
     if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > CLICK_DRAG_THRESHOLD) return;
 
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-    raycaster.setFromCamera(pointer, camera);
+    setPointerFromEvent(event);
     const meshes = Array.from(meshToId.keys());
     const intersections = raycaster.intersectObjects(meshes, false);
     const additive = event.shiftKey || event.ctrlKey || event.metaKey;
@@ -903,6 +1169,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     return { x: group.position.x, y: group.position.y, z: group.position.z };
   }
 
+  function getDimensions(id: string): { width: number; height: number; depth: number } | null {
+    const live = liveDimensions.get(id);
+    if (live) return live;
+    const object = lastSeen.get(id);
+    return object ? { width: object.width, height: object.height, depth: object.depth } : null;
+  }
+
   return {
     syncObjects,
     select,
@@ -912,6 +1185,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     setStandardView,
     zoomExtents,
     getPosition,
+    getDimensions,
     resize,
     render,
   };

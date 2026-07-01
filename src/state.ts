@@ -57,17 +57,29 @@ export class ObjectStore {
     this._objects = this._objects.map((o, index) => ({ ...o, color: colorForIndex(index) }));
   }
 
-  // Dragging moves an object's live position in the 3D scene without going
-  // through the store (so it doesn't trigger a camera reframe mid-drag).
-  // This reconciles the store with wherever objects actually ended up once
-  // a drag finishes, so later store-driven edits (e.g. a height edit's
-  // ground-clamp check) see the true, current position instead of a stale
-  // pre-drag one.
-  syncPositions(objects: readonly SizeObject[]): void {
-    const positionById = new Map(objects.map((o) => [o.id, o.position]));
+  // Both translate- and resize-dragging move/resize an object live in the 3D
+  // scene without going through the store (so mid-drag store notifications
+  // don't trigger a camera reframe or URL-sync spam). This reconciles the
+  // store with wherever objects actually ended up once a drag finishes —
+  // position for a move, position+dimensions for a resize (the
+  // anchored-opposite-face math shifts position too) — so later store-driven
+  // edits (e.g. a height edit's ground-clamp check) see the true, current
+  // state instead of a stale pre-drag one. No clamping here: whatever
+  // ground/min-size clamps applied, they were already applied live during
+  // the drag itself — redoing them here risks the two clamp formulas
+  // drifting apart.
+  syncGeometry(objects: readonly SizeObject[]): void {
+    const byId = new Map(objects.map((o) => [o.id, o]));
     this._objects = this._objects.map((o) => {
-      const position = positionById.get(o.id);
-      return position ? { ...o, position } : o;
+      const updated = byId.get(o.id);
+      if (!updated) return o;
+      return {
+        ...o,
+        width: updated.width,
+        height: updated.height,
+        depth: updated.depth,
+        position: updated.position,
+      };
     });
     this.notify();
   }
