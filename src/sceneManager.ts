@@ -364,8 +364,27 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   const transformControls = new TransformControls(camera, renderer.domElement);
   transformControls.setMode("translate");
+  transformControls.setRotationSnap(Math.PI / 2);
   transformControls.setSize(0.5);
   scene.add(transformControls.getHelper());
+  let transformMode: "translate" | "rotate" = "translate";
+
+  // The rotate gizmo's screen-aligned "E" ring and center "XYZE" sphere both
+  // rotate about the camera's view direction — an arbitrary axis that
+  // finishRotateDrag (below) can't decompose into a clean single-axis 90°
+  // swap. There's no public showE flag (E's visibility is tied to showX &&
+  // showY && showZ all being true), so the offending meshes are removed
+  // directly from the gizmo's internal groups. TransformControlsGizmo builds
+  // gizmo.rotate/picker.rotate once at construction and never recreates
+  // them, so this only needs to run once, here.
+  for (const group of [
+    (transformControls as unknown as { _gizmo: any })._gizmo.gizmo.rotate,
+    (transformControls as unknown as { _gizmo: any })._gizmo.picker.rotate,
+  ]) {
+    for (const child of [...group.children]) {
+      if (child.name === "E" || child.name === "XYZE") group.remove(child);
+    }
+  }
 
   // When multiple objects are selected the gizmo attaches to this invisible
   // proxy (positioned at the selection's centroid) instead of any one
@@ -461,7 +480,11 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     // event.value === false reliably means a drag just finished (covers
     // both single-object and multi-select rigid-group drags).
     if (!event.value) {
+      if (transformMode === "rotate" && attachedId) {
+        finishRotateDrag(attachedId);
+      }
       for (const listener of dragEndListeners) listener();
+      if (attachedId) liveDimensions.delete(attachedId);
     }
   });
 
@@ -502,6 +525,49 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     }
     updateGrid();
   });
+
+  // Rotation is faked by permuting dimensions rather than keeping a real
+  // rotation transform — every other system here (labels, face handles,
+  // grid/bounds, ground-clamp) assumes an axis-aligned box. TransformControls
+  // recomputes object.quaternion from scratch each frame off a snapshot taken
+  // at pointer-down (see TransformControls.js), so it's only read here once,
+  // at drag end — the swap is applied once and rotation reset to identity.
+  function finishRotateDrag(id: string): void {
+    const group = groups.get(id);
+    const object = lastSeen.get(id);
+    if (!group || !object) return;
+
+    const stepsX = Math.round(group.rotation.x / (Math.PI / 2));
+    const stepsY = Math.round(group.rotation.y / (Math.PI / 2));
+    const stepsZ = Math.round(group.rotation.z / (Math.PI / 2));
+    group.rotation.set(0, 0, 0);
+
+    let { width, height, depth } = object;
+    if (stepsX % 2 !== 0) [height, depth] = [depth, height];
+    if (stepsY % 2 !== 0) [width, depth] = [depth, width];
+    if (stepsZ % 2 !== 0) [width, height] = [height, width];
+
+    if (width === object.width && height === object.height && depth === object.depth) return;
+
+    const minY = height / 2;
+    if (group.position.y < minY) group.position.y = minY;
+
+    liveDimensions.set(id, { width, height, depth });
+    const parts = findGroupParts(group);
+    if (parts) {
+      const scratch: SizeObject = {
+        ...object,
+        width,
+        height,
+        depth,
+        position: { x: group.position.x, y: group.position.y, z: group.position.z },
+      };
+      rebuildGeometry(scratch, parts);
+      repositionFaceHandles((group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [], scratch);
+      updateDimensionLabels(parts.widthLabel, parts.heightLabel, parts.depthLabel, scratch);
+    }
+    updateGrid();
+  }
 
   const groups = new Map<string, THREE.Group>();
   const lastSeen = new Map<string, SizeObject>();
@@ -698,6 +764,13 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     applySelectionState();
   }
 
+  function setTransformMode(mode: "translate" | "rotate"): void {
+    transformMode = mode;
+    transformControls.setMode(mode);
+    applySelectionState();
+    updateToolbarUI();
+  }
+
   function disposeGroup(group: THREE.Group): void {
     group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
@@ -747,7 +820,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       }
     } else if (selectedIds.size > 1) {
       attachedId = null;
-      const centroid = computeCentroid(selectedIds);
+      // Rotating a multi-object proxy has no well-defined per-object
+      // dimension swap, so rotate mode simply has no gizmo for a
+      // multi-selection.
+      const centroid = transformMode === "translate" ? computeCentroid(selectedIds) : null;
       if (centroid) {
         multiSelectProxy.position.copy(centroid);
         transformControls.attach(multiSelectProxy);
@@ -1358,6 +1434,23 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   projectionGroup.append(perspectiveBtn, orthographicBtn);
 
+  const transformModeGroup = document.createElement("div");
+  transformModeGroup.className = "toolbar-group";
+
+  const TRANSFORM_MODE_LABELS: Record<"translate" | "rotate", string> = {
+    translate: "Move",
+    rotate: "Rotate",
+  };
+
+  const transformModeButtons = (Object.keys(TRANSFORM_MODE_LABELS) as Array<"translate" | "rotate">).map((mode) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = TRANSFORM_MODE_LABELS[mode];
+    btn.addEventListener("click", () => setTransformMode(mode));
+    transformModeGroup.appendChild(btn);
+    return { mode, btn };
+  });
+
   const displayStyleGroup = document.createElement("div");
   displayStyleGroup.className = "toolbar-group";
 
@@ -1436,7 +1529,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
 
   const topRow = document.createElement("div");
   topRow.className = "toolbar-row";
-  topRow.append(projectionGroup, displayStyleGroup, labelGroup);
+  topRow.append(projectionGroup, transformModeGroup, displayStyleGroup, labelGroup);
 
   toolbar.append(topRow, viewGroup);
   container.appendChild(toolbar);
@@ -1449,6 +1542,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
       btn.disabled = projectionMode !== "orthographic";
       btn.classList.toggle("active", view === currentStandardView);
     }
+    for (const { mode, btn } of transformModeButtons) btn.classList.toggle("active", transformMode === mode);
     for (const { style, btn } of displayStyleButtons) btn.classList.toggle("active", displayStyle === style);
     nameLabelsBtn.classList.toggle("active", showNameLabels);
     dimensionLabelsBtn.classList.toggle("active", showDimensionLabels);
