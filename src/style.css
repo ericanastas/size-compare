@@ -89,9 +89,9 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #2f333b;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #2f333b;
 }
 
 .share-actions button {

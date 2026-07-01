@@ -144,6 +144,10 @@ export function createSidebar(
         : `Loaded ${rows.length} object${rows.length === 1 ? "" : "s"}.`;
   });
 
+  const list = document.createElement("div");
+  list.className = "object-list";
+  container.appendChild(list);
+
   const shareActions = document.createElement("div");
   shareActions.className = "share-actions";
 
@@ -166,10 +170,6 @@ export function createSidebar(
       shareStatus.textContent = url;
     }
   });
-
-  const list = document.createElement("div");
-  list.className = "object-list";
-  container.appendChild(list);
 
   let selectedIds: readonly string[] = [];
 
