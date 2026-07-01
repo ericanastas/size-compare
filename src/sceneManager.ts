@@ -160,6 +160,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   const selectListeners: Array<(ids: string[]) => void> = [];
   const selectedIds = new Set<string>();
   let attachedId: string | null = null;
+  let showNameLabels = true;
+  let showDimensionLabels = true;
 
   function buildGroup(object: SizeObject): THREE.Group {
     const group = new THREE.Group();
@@ -195,11 +197,17 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     labelEl.textContent = object.name;
     const label = new CSS2DObject(labelEl);
     label.position.set(0, 0, 0);
+    label.userData.role = "nameLabel";
+    label.visible = showNameLabels;
     group.add(label);
 
     const widthLabel = createDimensionLabel("width");
     const heightLabel = createDimensionLabel("height");
     const depthLabel = createDimensionLabel("depth");
+    for (const dimensionLabel of [widthLabel, heightLabel, depthLabel]) {
+      dimensionLabel.userData.role = "dimensionLabel";
+      dimensionLabel.visible = showDimensionLabels;
+    }
     group.add(widthLabel, heightLabel, depthLabel);
 
     updateDimensionLabels(widthLabel, heightLabel, depthLabel, object);
@@ -259,6 +267,26 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     label.position.set(0, 0, 0);
 
     updateDimensionLabels(widthLabel, heightLabel, depthLabel, object);
+  }
+
+  function applyLabelVisibility(): void {
+    for (const group of groups.values()) {
+      for (const child of group.children) {
+        if (!(child instanceof CSS2DObject)) continue;
+        if (child.userData.role === "nameLabel") child.visible = showNameLabels;
+        else if (child.userData.role === "dimensionLabel") child.visible = showDimensionLabels;
+      }
+    }
+  }
+
+  function setNameLabelsVisible(visible: boolean): void {
+    showNameLabels = visible;
+    applyLabelVisibility();
+  }
+
+  function setDimensionLabelsVisible(visible: boolean): void {
+    showDimensionLabels = visible;
+    applyLabelVisibility();
   }
 
   function disposeGroup(group: THREE.Group): void {
@@ -566,7 +594,32 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     return btn;
   });
 
-  toolbar.append(projectionGroup, viewGroup);
+  const labelGroup = document.createElement("div");
+  labelGroup.className = "toolbar-group";
+
+  const nameLabelsBtn = document.createElement("button");
+  nameLabelsBtn.type = "button";
+  nameLabelsBtn.textContent = "Show Names";
+  nameLabelsBtn.addEventListener("click", () => {
+    setNameLabelsVisible(!showNameLabels);
+    updateToolbarUI();
+  });
+
+  const dimensionLabelsBtn = document.createElement("button");
+  dimensionLabelsBtn.type = "button";
+  dimensionLabelsBtn.textContent = "Show Dimensions";
+  dimensionLabelsBtn.addEventListener("click", () => {
+    setDimensionLabelsVisible(!showDimensionLabels);
+    updateToolbarUI();
+  });
+
+  labelGroup.append(nameLabelsBtn, dimensionLabelsBtn);
+
+  const topRow = document.createElement("div");
+  topRow.className = "toolbar-row";
+  topRow.append(projectionGroup, labelGroup);
+
+  toolbar.append(topRow, viewGroup);
   container.appendChild(toolbar);
 
   function updateToolbarUI(): void {
@@ -574,6 +627,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orthographicBtn.classList.toggle("active", projectionMode === "orthographic");
     viewGroup.classList.toggle("visible", projectionMode === "orthographic");
     for (const btn of viewButtons) btn.disabled = projectionMode !== "orthographic";
+    nameLabelsBtn.classList.toggle("active", showNameLabels);
+    dimensionLabelsBtn.classList.toggle("active", showDimensionLabels);
   }
 
   updateToolbarUI();
