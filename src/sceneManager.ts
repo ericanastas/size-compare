@@ -171,6 +171,26 @@ const STANDARD_VIEW_DIRECTIONS: Record<StandardView, THREE.Vector3> = {
   right: new THREE.Vector3(1, 0, 0),
 };
 
+// The face directly facing the camera in each standard view — resizing it is
+// geometrically impossible in that exact view (see screenSpaceEdgeFaceHit).
+const STANDARD_VIEW_FACING_AXIS: Record<StandardView, "x" | "y" | "z"> = {
+  top: "y",
+  bottom: "y",
+  front: "z",
+  back: "z",
+  left: "x",
+  right: "x",
+};
+
+// Fraction of the selected box's on-screen footprint, on each edge, reserved
+// for grabbing a side face instead of the (otherwise unresizable) facing
+// face — see screenSpaceEdgeFaceHit.
+const STANDARD_VIEW_EDGE_MARGIN = 0.1;
+
+function axisUnitVector(axis: "x" | "y" | "z"): THREE.Vector3 {
+  return new THREE.Vector3(axis === "x" ? 1 : 0, axis === "y" ? 1 : 0, axis === "z" ? 1 : 0);
+}
+
 function copyCameraPose(from: THREE.Camera, to: THREE.Camera): void {
   to.position.copy(from.position);
   to.quaternion.copy(from.quaternion);
@@ -942,17 +962,108 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     updateCursor();
   }
 
-  // Raycasts only the currently-selected object's face handles (never the
-  // whole scene's — only one group's are ever visible at a time anyway).
+  // In an exact standard ortho view every screen ray runs parallel to the
+  // camera's view direction, so raycasting can never hit a side face (its
+  // plane is exactly parallel to the ray) — only the facing face, which
+  // fills the whole screen footprint. Side faces are hit-tested from screen
+  // position instead: the outer edge of the box's on-screen footprint maps
+  // to whichever side face sits on that edge; the center is left dead,
+  // since the facing face can never actually be dragged in this view anyway
+  // (see startResizeDrag's eye/axisUnit degeneracy check).
+  function screenSpaceEdgeFaceHit(
+    id: string,
+    group: THREE.Group,
+    object: { width: number; height: number; depth: number },
+    view: StandardView,
+  ): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
+    const half = { x: object.width / 2, y: object.height / 2, z: object.depth / 2 };
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const corner = new THREE.Vector3();
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          corner
+            .set(group.position.x + sx * half.x, group.position.y + sy * half.y, group.position.z + sz * half.z)
+            .project(camera);
+          if (corner.x < minX) minX = corner.x;
+          if (corner.x > maxX) maxX = corner.x;
+          if (corner.y < minY) minY = corner.y;
+          if (corner.y > maxY) maxY = corner.y;
+        }
+      }
+    }
+    if (maxX <= minX || maxY <= minY) return null;
+
+    const normX = (pointer.x - minX) / (maxX - minX);
+    const normY = (pointer.y - minY) / (maxY - minY);
+    if (normX < 0 || normX > 1 || normY < 0 || normY > 1) return null;
+
+    const distX = Math.min(normX, 1 - normX);
+    const distY = Math.min(normY, 1 - normY);
+    const outsideX = distX < STANDARD_VIEW_EDGE_MARGIN;
+    const outsideY = distY < STANDARD_VIEW_EDGE_MARGIN;
+    if (!outsideX && !outsideY) return null;
+
+    const facingAxis = STANDARD_VIEW_FACING_AXIS[view];
+    const [axisA, axisB] = (["x", "y", "z"] as const).filter((axis) => axis !== facingAxis);
+    const camRight = new THREE.Vector3(1, 0, 0).transformDirection(camera.matrixWorld);
+    const camUp = new THREE.Vector3(0, 1, 0).transformDirection(camera.matrixWorld);
+
+    // Whichever side axis aligns more with camRight maps to the screen-X
+    // edges; the other maps to screen-Y. The sign of the dot product tells
+    // us which world direction increasing screen-x/y corresponds to.
+    const rightDotA = axisUnitVector(axisA).dot(camRight);
+    const rightDotB = axisUnitVector(axisB).dot(camRight);
+    const xAxis = Math.abs(rightDotA) >= Math.abs(rightDotB) ? axisA : axisB;
+    const yAxis = xAxis === axisA ? axisB : axisA;
+    const xScreenSign = xAxis === axisA ? rightDotA : rightDotB;
+    const yScreenSign = axisUnitVector(yAxis).dot(camUp);
+
+    // Screen coordinate 0 is always the "min" edge (left for x, bottom for
+    // y) — if increasing the world axis increases the screen coordinate,
+    // that edge holds the face at the *smallest* world coordinate (sign -1),
+    // otherwise the largest (sign +1); the far edge is the opposite.
+    function edgeFaceSign(nearMinEdge: boolean, screenSign: number): 1 | -1 {
+      if (nearMinEdge) return screenSign > 0 ? -1 : 1;
+      return screenSign > 0 ? 1 : -1;
+    }
+
+    // A corner is outside both bands — prefer whichever axis is more
+    // clearly at its edge (smaller distance from that edge).
+    const useX = outsideX && (!outsideY || distX <= distY);
+    const face: FaceAxis = useX
+      ? { axis: xAxis, sign: edgeFaceSign(normX < 0.5, xScreenSign) }
+      : { axis: yAxis, sign: edgeFaceSign(normY < 0.5, yScreenSign) };
+
+    const faceIndex = FACES.findIndex((f) => f.axis === face.axis && f.sign === face.sign);
+    const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
+    const grip = faceHandles[faceIndex];
+    return grip ? { id, face, grip } : null;
+  }
+
   // Reused for both starting a drag (pointerdown) and hover detection.
   function hitTestFaceHandle(event: PointerEvent): { id: string; face: FaceAxis; grip: THREE.Mesh } | null {
     if (!freeResizeEnabled || selectedIds.size !== 1) return null;
     const [id] = selectedIds;
     const group = groups.get(id);
-    if (!group) return null;
-    const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
+    const object = lastSeen.get(id);
+    if (!group || !object) return null;
 
     setPointerFromEvent(event);
+
+    // In an exact standard ortho view the facing face can never actually be
+    // dragged (see startResizeDrag), and its handle geometrically covers the
+    // whole screen footprint, so raycasting it would shadow the side faces
+    // entirely — screen-space edge hit-testing replaces the raycast rather
+    // than supplementing it.
+    if (currentStandardView) {
+      return screenSpaceEdgeFaceHit(id, group, object, currentStandardView);
+    }
+
+    const faceHandles = (group.userData.faceHandles as THREE.Mesh[] | undefined) ?? [];
     const hits = raycaster.intersectObjects(faceHandles, false);
     if (hits.length === 0) return null;
     const grip = hits[0].object as THREE.Mesh;
