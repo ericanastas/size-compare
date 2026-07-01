@@ -139,7 +139,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     labelEl.className = "object-label";
     labelEl.textContent = object.name;
     const label = new CSS2DObject(labelEl);
-    label.position.set(0, object.height / 2 + 0.6, 0);
+    label.position.set(0, 0, 0);
     group.add(label);
 
     return group;
@@ -160,7 +160,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     (edges.material as THREE.LineBasicMaterial).color.setHex(object.color);
 
     label.element.textContent = object.name;
-    label.position.set(0, object.height / 2 + 0.6, 0);
+    label.position.set(0, 0, 0);
   }
 
   function disposeGroup(group: THREE.Group): void {

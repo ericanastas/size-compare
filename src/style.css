@@ -258,5 +258,5 @@ h1 {
   padding: 2px 6px;
   border-radius: 3px;
   white-space: nowrap;
-  transform: translate(-50%, -100%);
+  transform: translate(-50%, -50%);
 }
