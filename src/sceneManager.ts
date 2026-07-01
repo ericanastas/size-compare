@@ -172,14 +172,17 @@ const STANDARD_VIEW_DIRECTIONS: Record<StandardView, THREE.Vector3> = {
 };
 
 // The face directly facing the camera in each standard view — resizing it is
-// geometrically impossible in that exact view (see screenSpaceEdgeFaceHit).
-const STANDARD_VIEW_FACING_AXIS: Record<StandardView, "x" | "y" | "z"> = {
-  top: "y",
-  bottom: "y",
-  front: "z",
-  back: "z",
-  left: "x",
-  right: "x",
+// geometrically impossible in that exact view (see screenSpaceEdgeFaceHit),
+// and it's also where the resize-edge indicator strip is drawn (see
+// updateResizeEdgeIndicator), since it's the one face that's actually
+// visible face-on in that view.
+const STANDARD_VIEW_FACING_FACE: Record<StandardView, FaceAxis> = {
+  top: { axis: "y", sign: 1 },
+  bottom: { axis: "y", sign: -1 },
+  front: { axis: "z", sign: 1 },
+  back: { axis: "z", sign: -1 },
+  left: { axis: "x", sign: -1 },
+  right: { axis: "x", sign: 1 },
 };
 
 // Fraction of the selected box's on-screen footprint, on each edge, reserved
@@ -370,6 +373,71 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   scene.add(multiSelectProxy);
   let multiDragStart: { proxyPosition: THREE.Vector3; groupPositions: Map<string, THREE.Vector3> } | null = null;
   const dragEndListeners: Array<() => void> = [];
+
+  // In a standard ortho view the side-face handle being grabbed is edge-on
+  // to the camera (zero on-screen area), so its own opacity-based hover
+  // highlight is invisible there — this strip is drawn on the *facing* face
+  // instead (which is fully visible face-on), sized to exactly match the
+  // clickable margin band from screenSpaceEdgeFaceHit. Only one object can
+  // ever be hovered/dragged at a time, so a single shared mesh (repositioned
+  // per hit) is enough — same reasoning as multiSelectProxy above.
+  const resizeEdgeIndicatorGeometry = new THREE.BufferGeometry();
+  resizeEdgeIndicatorGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+  resizeEdgeIndicatorGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+  const resizeEdgeIndicator = new THREE.Mesh(
+    resizeEdgeIndicatorGeometry,
+    new THREE.MeshBasicMaterial({
+      color: FACE_HIGHLIGHT_COLOR,
+      transparent: true,
+      opacity: 0.75,
+      depthTest: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  resizeEdgeIndicator.visible = false;
+  scene.add(resizeEdgeIndicator);
+
+  function updateResizeEdgeIndicator(hit: { id: string; face: FaceAxis } | null, view: StandardView | null): void {
+    if (!hit || !view) {
+      resizeEdgeIndicator.visible = false;
+      return;
+    }
+    const group = groups.get(hit.id);
+    const dims = getDimensions(hit.id);
+    if (!group || !dims) {
+      resizeEdgeIndicator.visible = false;
+      return;
+    }
+
+    const half: Record<"x" | "y" | "z", number> = { x: dims.width / 2, y: dims.height / 2, z: dims.depth / 2 };
+    const facingFace = STANDARD_VIEW_FACING_FACE[view];
+    const sideAxis = hit.face.axis;
+    const facingAxis = facingFace.axis;
+    const thirdAxis = (["x", "y", "z"] as const).find((axis) => axis !== sideAxis && axis !== facingAxis)!;
+
+    const outerA = hit.face.sign * half[sideAxis];
+    const innerA = hit.face.sign * half[sideAxis] * (1 - 2 * STANDARD_VIEW_EDGE_MARGIN);
+    const facingCoord = facingFace.sign * half[facingAxis];
+
+    function corner(aValue: number, tValue: number): [number, number, number] {
+      const local = { x: 0, y: 0, z: 0 };
+      local[sideAxis] = aValue;
+      local[facingAxis] = facingCoord;
+      local[thirdAxis] = tValue;
+      return [group!.position.x + local.x, group!.position.y + local.y, group!.position.z + local.z];
+    }
+
+    const positions = resizeEdgeIndicatorGeometry.attributes.position as THREE.BufferAttribute;
+    positions.set([
+      ...corner(outerA, -half[thirdAxis]),
+      ...corner(outerA, half[thirdAxis]),
+      ...corner(innerA, half[thirdAxis]),
+      ...corner(innerA, -half[thirdAxis]),
+    ]);
+    positions.needsUpdate = true;
+    resizeEdgeIndicatorGeometry.computeBoundingSphere();
+    resizeEdgeIndicator.visible = true;
+  }
 
   transformControls.addEventListener("axis-changed", () => updateCursor());
 
@@ -665,6 +733,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     // Selection changed — don't leave a stale highlight on a face that's
     // no longer shown (e.g. selection moved to a different object).
     setHoveredFaceHandle(null);
+    updateResizeEdgeIndicator(null, null);
 
     if (selectedIds.size === 1) {
       const [id] = selectedIds;
@@ -1007,7 +1076,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     const outsideY = distY < STANDARD_VIEW_EDGE_MARGIN;
     if (!outsideX && !outsideY) return null;
 
-    const facingAxis = STANDARD_VIEW_FACING_AXIS[view];
+    const facingAxis = STANDARD_VIEW_FACING_FACE[view].axis;
     const [axisA, axisB] = (["x", "y", "z"] as const).filter((axis) => axis !== facingAxis);
     const camRight = new THREE.Vector3(1, 0, 0).transformDirection(camera.matrixWorld);
     const camUp = new THREE.Vector3(0, 1, 0).transformDirection(camera.matrixWorld);
@@ -1083,13 +1152,18 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     if (event.buttons !== 0 || resizeDrag || transformControls.dragging) return;
     if (selectedIds.size !== 1) {
       setHoveredFaceHandle(null);
+      updateResizeEdgeIndicator(null, null);
       return;
     }
     const hit = hitTestFaceHandle(event);
     setHoveredFaceHandle(hit ? hit.grip : null);
+    updateResizeEdgeIndicator(hit, currentStandardView);
   });
 
-  renderer.domElement.addEventListener("pointerleave", () => setHoveredFaceHandle(null));
+  renderer.domElement.addEventListener("pointerleave", () => {
+    setHoveredFaceHandle(null);
+    updateResizeEdgeIndicator(null, null);
+  });
 
   // Builds the same axis-constrained drag plane TransformControlsPlane uses
   // internally for single-axis translate (verified against
@@ -1135,6 +1209,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     };
     orbitControls.enabled = false;
     setHoveredFaceHandle(hit.grip);
+    updateResizeEdgeIndicator(hit, currentStandardView);
     return true;
   }
 
@@ -1185,6 +1260,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     updateDimensionLabels(resizeDrag.parts.widthLabel, resizeDrag.parts.heightLabel, resizeDrag.parts.depthLabel, scratch);
 
     liveDimensions.set(resizeDrag.id, { width: newWidth, height: newHeight, depth: newDepth });
+    updateResizeEdgeIndicator({ id: resizeDrag.id, face: resizeDrag.face }, currentStandardView);
     updateGrid();
   });
 
