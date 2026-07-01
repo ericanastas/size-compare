@@ -52,7 +52,11 @@ function syncUrl(): void {
 }
 
 store.subscribe(syncUrl);
-sceneManager.onDragEnd(syncUrl);
+
+// Reconcile the store with the scene once a drag finishes — this also
+// triggers syncUrl via the store.subscribe above, so no separate call is
+// needed here.
+sceneManager.onDragEnd(() => store.syncPositions(getLiveObjects()));
 
 sceneManager.resize();
 window.addEventListener("resize", () => sceneManager.resize());

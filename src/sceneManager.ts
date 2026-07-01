@@ -7,14 +7,17 @@ import type { SizeObject } from "./types";
 const BOX_OPACITY = 0.35;
 const SELECTION_OUTLINE_COLOR = 0x4a7dfc;
 
-function hasDimensionsChanged(previous: SizeObject | undefined, current: SizeObject): boolean {
+function hasObjectChanged(previous: SizeObject | undefined, current: SizeObject): boolean {
   if (!previous) return false;
   return (
     previous.name !== current.name ||
     previous.width !== current.width ||
     previous.height !== current.height ||
     previous.depth !== current.depth ||
-    previous.color !== current.color
+    previous.color !== current.color ||
+    previous.position.x !== current.position.x ||
+    previous.position.y !== current.position.y ||
+    previous.position.z !== current.position.z
   );
 }
 
@@ -364,6 +367,8 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   }
 
   function updateGroup(group: THREE.Group, object: SizeObject): void {
+    group.position.set(object.position.x, object.position.y, object.position.z);
+
     const mesh = group.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh);
     const lineSegments = group.children.filter((c): c is THREE.LineSegments => c instanceof THREE.LineSegments);
     const edges = lineSegments.find((l) => l.userData.role === "edges");
@@ -510,7 +515,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
         const group = buildGroup(object);
         groups.set(object.id, group);
         scene.add(group);
-      } else if (hasDimensionsChanged(lastSeen.get(object.id), object)) {
+      } else if (hasObjectChanged(lastSeen.get(object.id), object)) {
         updateGroup(existing, object);
       }
       lastSeen.set(object.id, object);

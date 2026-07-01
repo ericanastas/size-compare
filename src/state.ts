@@ -47,6 +47,21 @@ export class ObjectStore {
     this.notify();
   }
 
+  // Dragging moves an object's live position in the 3D scene without going
+  // through the store (so it doesn't trigger a camera reframe mid-drag).
+  // This reconciles the store with wherever objects actually ended up once
+  // a drag finishes, so later store-driven edits (e.g. a height edit's
+  // ground-clamp check) see the true, current position instead of a stale
+  // pre-drag one.
+  syncPositions(objects: readonly SizeObject[]): void {
+    const positionById = new Map(objects.map((o) => [o.id, o.position]));
+    this._objects = this._objects.map((o) => {
+      const position = positionById.get(o.id);
+      return position ? { ...o, position } : o;
+    });
+    this.notify();
+  }
+
   updateMany(
     ids: readonly string[],
     patch: { name?: string; width?: number; height?: number; depth?: number },
@@ -55,13 +70,21 @@ export class ObjectStore {
     this._objects = this._objects.map((o) => {
       if (!idSet.has(o.id)) return o;
       const height = patch.height ?? o.height;
+
+      // Only a height change can push the base below the ground (width/
+      // depth edits don't affect y at all), and even then only nudge the
+      // object *up* just enough to keep its base at y=0 — never move it
+      // down, which would undo any manual elevation from dragging.
+      const minY = height / 2;
+      const y = patch.height !== undefined && o.position.y < minY ? minY : o.position.y;
+
       return {
         ...o,
         name: patch.name ?? o.name,
         width: patch.width ?? o.width,
         height,
         depth: patch.depth ?? o.depth,
-        position: { ...o.position, y: height / 2 },
+        position: { ...o.position, y },
       };
     });
     this.notify();
