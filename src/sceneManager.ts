@@ -207,6 +207,22 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   orbitControls.target.set(0, 2, 0);
   orbitControls.enableDamping = true;
 
+  // Panning shifts camera position and target together, and orthographic
+  // dolly (zoom) only touches camera.zoom — neither changes the viewing
+  // direction, so the active standard-view button stays highlighted through
+  // both. Orbiting is the only gesture that actually changes this vector,
+  // so it's the only thing that should clear the highlight.
+  orbitControls.addEventListener("change", () => {
+    if (!currentStandardView) return;
+    const direction = camera.position.clone().sub(orbitControls.target);
+    if (direction.lengthSq() < 1e-9) return;
+    direction.normalize();
+    if (direction.dot(STANDARD_VIEW_DIRECTIONS[currentStandardView]) < 0.9999) {
+      currentStandardView = null;
+      updateToolbarUI();
+    }
+  });
+
   const transformControls = new TransformControls(camera, renderer.domElement);
   transformControls.setMode("translate");
   transformControls.setSize(0.5);
@@ -289,6 +305,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
   let showNameLabels = true;
   let showDimensionLabels = true;
   let displayStyle: DisplayStyle = "transparent";
+  let currentStandardView: StandardView | null = null;
 
   // Wireframe is driven by opacity, not mesh.visible — Raycaster skips
   // invisible objects, and this mesh is exactly what click-to-select
@@ -705,8 +722,14 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     orthographicCamera.zoom = 1;
     orthographicCamera.updateProjectionMatrix();
 
+    // Set before orbitControls.update() so the "change" listener above sees
+    // the new target view already in place and confirms the direction match
+    // rather than momentarily comparing against the view being left.
+    currentStandardView = view;
+
     orbitControls.target.copy(frameCenter);
     orbitControls.update();
+    updateToolbarUI();
   }
 
   const raycaster = new THREE.Raycaster();
@@ -823,7 +846,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     btn.textContent = VIEW_LABELS[view];
     btn.addEventListener("click", () => setStandardView(view));
     viewGroup.appendChild(btn);
-    return btn;
+    return { view, btn };
   });
 
   const labelGroup = document.createElement("div");
@@ -863,7 +886,10 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     perspectiveBtn.classList.toggle("active", projectionMode === "perspective");
     orthographicBtn.classList.toggle("active", projectionMode === "orthographic");
     viewGroup.classList.toggle("visible", projectionMode === "orthographic");
-    for (const btn of viewButtons) btn.disabled = projectionMode !== "orthographic";
+    for (const { view, btn } of viewButtons) {
+      btn.disabled = projectionMode !== "orthographic";
+      btn.classList.toggle("active", view === currentStandardView);
+    }
     for (const { style, btn } of displayStyleButtons) btn.classList.toggle("active", displayStyle === style);
     nameLabelsBtn.classList.toggle("active", showNameLabels);
     dimensionLabelsBtn.classList.toggle("active", showDimensionLabels);
