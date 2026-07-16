@@ -1,3 +1,5 @@
+import { getActiveUnit } from "./units";
+
 export function convertDisplayUnits(meters: number): string {
-  return `${meters.toFixed(2)} m`;
+  return getActiveUnit().displayValue(meters);
 }

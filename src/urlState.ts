@@ -1,7 +1,9 @@
 import type { SizeObject } from "./types";
 import { colorForIndex } from "./state";
+import { getActiveUnit } from "./units";
 
 const PARAM = "state";
+const UNIT_PARAM = "unit";
 
 type EncodedObject = [name: string, width: number, height: number, depth: number, x: number, y: number, z: number];
 
@@ -41,7 +43,14 @@ export function buildShareUrl(objects: readonly SizeObject[]): string {
   const url = new URL(window.location.href);
   url.search = "";
   url.searchParams.set(PARAM, base64UrlEncode(JSON.stringify(payload)));
+  // Encode the active display unit so a shared link opens in the sender's
+  // unit. Geometry above is always meters and unaffected by this.
+  url.searchParams.set(UNIT_PARAM, getActiveUnit().abbreviation);
   return url.toString();
+}
+
+export function decodeUnitFromLocation(): string | null {
+  return new URLSearchParams(window.location.search).get(UNIT_PARAM);
 }
 
 export function decodeStateFromLocation(): SizeObject[] | null {

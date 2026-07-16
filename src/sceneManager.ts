@@ -150,6 +150,7 @@ export interface SceneManager {
   zoomExtents(): void;
   getPosition(id: string): { x: number; y: number; z: number } | null;
   getDimensions(id: string): { width: number; height: number; depth: number } | null;
+  refreshLabels(): void;
   resize(): void;
   render(): void;
 }
@@ -1570,6 +1571,20 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     return object ? { width: object.width, height: object.height, depth: object.depth } : null;
   }
 
+  // Repaint every object's dimension labels without changing geometry. Used
+  // when the display unit changes: syncObjects only relabels objects that
+  // actually changed (hasObjectChanged), so a pure unit switch needs an
+  // explicit pass. convertDisplayUnits reads the now-active unit.
+  function refreshLabels(): void {
+    for (const [id, group] of groups) {
+      const object = lastSeen.get(id);
+      if (!object) continue;
+      const parts = findGroupParts(group);
+      if (!parts) continue;
+      updateDimensionLabels(parts.widthLabel, parts.heightLabel, parts.depthLabel, object);
+    }
+  }
+
   return {
     syncObjects,
     select,
@@ -1580,6 +1595,7 @@ export function createSceneManager(container: HTMLElement): SceneManager {
     zoomExtents,
     getPosition,
     getDimensions,
+    refreshLabels,
     resize,
     render,
   };

@@ -2,6 +2,14 @@ import type { ObjectStore } from "./state";
 import type { SizeObject } from "./types";
 import { objectsToCsv, parseShapesCsv } from "./csv";
 import { convertDisplayUnits } from "./formats";
+import {
+  UNIT_SYSTEMS,
+  getActiveUnit,
+  metersToActiveUnitNumber,
+  parseToMeters,
+  setActiveUnit,
+  subscribeUnit,
+} from "./units";
 
 export interface Sidebar {
   setSelected(ids: readonly string[]): void;
@@ -25,7 +33,18 @@ function hexColor(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
-function field(labelText: string, type: string, defaultValue: string): { wrapper: HTMLElement; input: HTMLInputElement } {
+// Pre-fill value for an edit field: the stored meters converted into the
+// active unit. Rounded to 6 decimals (then trailing zeros stripped) so it
+// reads cleanly without the 2-decimal truncation of the display formatter.
+function formatFieldValue(meters: number): string {
+  return String(Number(metersToActiveUnitNumber(meters).toFixed(6)));
+}
+
+function field(
+  labelText: string,
+  type: string,
+  defaultValue: string,
+): { wrapper: HTMLElement; input: HTMLInputElement; span: HTMLSpanElement } {
   const wrapper = document.createElement("label");
   wrapper.className = "field";
   const span = document.createElement("span");
@@ -39,7 +58,7 @@ function field(labelText: string, type: string, defaultValue: string): { wrapper
   input.value = defaultValue;
   input.required = true;
   wrapper.append(span, input);
-  return { wrapper, input };
+  return { wrapper, input, span };
 }
 
 export function createSidebar(
@@ -55,14 +74,39 @@ export function createSidebar(
   heading.textContent = "Size Compare";
   container.appendChild(heading);
 
+  const unitField = document.createElement("label");
+  unitField.className = "field unit-field";
+  const unitSpan = document.createElement("span");
+  unitSpan.textContent = "Units";
+  const unitSelect = document.createElement("select");
+  for (const unit of UNIT_SYSTEMS) {
+    const option = document.createElement("option");
+    option.value = unit.abbreviation;
+    option.textContent = unit.name;
+    unitSelect.appendChild(option);
+  }
+  unitSelect.value = getActiveUnit().abbreviation;
+  unitSelect.addEventListener("change", () => setActiveUnit(unitSelect.value));
+  unitField.append(unitSpan, unitSelect);
+  container.appendChild(unitField);
+
   const form = document.createElement("form");
   form.className = "add-form";
   form.noValidate = true;
 
   const nameField = field("Name", "text", "");
-  const widthField = field("Width (m)", "number", DEFAULT_DIMENSION);
-  const heightField = field("Height (m)", "number", DEFAULT_DIMENSION);
-  const depthField = field("Depth (m)", "number", DEFAULT_DIMENSION);
+  // Dimension inputs are text (not number) so the user can type a unit suffix
+  // like `12"` or `5 mm`; parsing/validation goes through parseToMeters.
+  const widthField = field("Width", "text", DEFAULT_DIMENSION);
+  const heightField = field("Height", "text", DEFAULT_DIMENSION);
+  const depthField = field("Depth", "text", DEFAULT_DIMENSION);
+
+  function updateFieldLabels(): void {
+    const abbr = getActiveUnit().abbreviation;
+    widthField.span.textContent = `Width (${abbr})`;
+    heightField.span.textContent = `Height (${abbr})`;
+    depthField.span.textContent = `Depth (${abbr})`;
+  }
 
   const error = document.createElement("p");
   error.className = "form-error";
@@ -204,8 +248,8 @@ export function createSidebar(
         [depthRaw, "depth"],
       ] as const) {
         if (raw === "") continue;
-        const n = Number(raw);
-        if (!Number.isFinite(n) || n <= 0) {
+        const n = parseToMeters(raw);
+        if (n === null || n <= 0) {
           error.textContent = "Width, height, and depth must be positive numbers.";
           return;
         }
@@ -218,15 +262,22 @@ export function createSidebar(
     }
 
     const name = nameField.input.value.trim();
-    const width = Number(widthField.input.value);
-    const height = Number(heightField.input.value);
-    const depth = Number(depthField.input.value);
+    const width = parseToMeters(widthField.input.value);
+    const height = parseToMeters(heightField.input.value);
+    const depth = parseToMeters(depthField.input.value);
 
     if (!name) {
       error.textContent = "Name is required.";
       return;
     }
-    if (![width, height, depth].every((n) => Number.isFinite(n) && n > 0)) {
+    if (
+      width === null ||
+      height === null ||
+      depth === null ||
+      width <= 0 ||
+      height <= 0 ||
+      depth <= 0
+    ) {
       error.textContent = "Width, height, and depth must be positive numbers.";
       return;
     }
@@ -248,9 +299,9 @@ export function createSidebar(
 
     if (selected.length > 0) {
       setFieldValue(nameField.input, selected.map((o) => o.name));
-      setFieldValue(widthField.input, selected.map((o) => String(o.width)));
-      setFieldValue(heightField.input, selected.map((o) => String(o.height)));
-      setFieldValue(depthField.input, selected.map((o) => String(o.depth)));
+      setFieldValue(widthField.input, selected.map((o) => formatFieldValue(o.width)));
+      setFieldValue(heightField.input, selected.map((o) => formatFieldValue(o.height)));
+      setFieldValue(depthField.input, selected.map((o) => formatFieldValue(o.depth)));
       submitButton.textContent = selected.length > 1 ? `Update ${selected.length} objects` : "Update object";
       cancelButton.hidden = false;
     } else {
@@ -312,6 +363,18 @@ export function createSidebar(
   }
 
   store.subscribe(renderList);
+
+  // Re-render everything that shows a unit when the active unit changes: field
+  // labels, the object list (via convertDisplayUnits), and any prefilled edit
+  // values (re-converted into the new unit). Fires immediately, so it also sets
+  // the initial field labels and keeps the dropdown in sync with a unit chosen
+  // elsewhere (e.g. from the share URL on load).
+  subscribeUnit(() => {
+    unitSelect.value = getActiveUnit().abbreviation;
+    updateFieldLabels();
+    renderList(store.objects);
+    applyFormMode();
+  });
 
   return {
     setSelected(ids) {

@@ -1,7 +1,8 @@
 import { ObjectStore } from "./state";
 import { createSceneManager } from "./sceneManager";
 import { createSidebar } from "./sidebar";
-import { buildShareUrl, decodeStateFromLocation } from "./urlState";
+import { buildShareUrl, decodeStateFromLocation, decodeUnitFromLocation } from "./urlState";
+import { setActiveUnit, subscribeUnit } from "./units";
 
 const sidebarEl = document.getElementById("sidebar");
 const viewportEl = document.getElementById("viewport");
@@ -32,6 +33,18 @@ const sidebar = createSidebar(
 
 store.subscribe((objects) => sceneManager.syncObjects(objects));
 sceneManager.onSelect((ids) => sidebar.setSelected(ids));
+
+// Repaint the 3D dimension labels when the display unit changes. The sidebar
+// refreshes its own list/form via its own unit subscription.
+subscribeUnit(() => sceneManager.refreshLabels());
+
+// A unit in the share URL overrides the localStorage default so a shared link
+// opens in the sender's unit. Applied before loading objects so the initial
+// labels render in the right unit.
+const sharedUnit = decodeUnitFromLocation();
+if (sharedUnit) {
+  setActiveUnit(sharedUnit);
+}
 
 const sharedObjects = decodeStateFromLocation();
 if (sharedObjects) {
